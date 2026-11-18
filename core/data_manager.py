@@ -8,6 +8,8 @@ from datetime import datetime
 
 import numpy as np
 
+from core.calculation import CalcError, evaluate
+
 
 class Series:
     """Append-only (t, y) arrays with amortised growth."""
@@ -32,6 +34,16 @@ class Series:
         return self._t[:self.n], self._y[:self.n]
 
 
+@dataclass(frozen=True)
+class Calc:
+    """A calculated measurement. refs maps each [name] used in expr to a recorded series key."""
+    key: str
+    name: str
+    unit: str
+    expr: str
+    refs: dict[str, str]
+
+
 @dataclass
 class Run:
     number: int
@@ -41,8 +53,9 @@ class Run:
 
 class DataManager:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.runs: list[Run] = []
+        self.calcs: dict[str, Calc] = {}  # touched from the GUI thread only
         self.recording = False
 
     def start_run(self) -> Run:
@@ -65,7 +78,14 @@ class DataManager:
             self.runs[-1].series.setdefault(key, Series()).extend(t, y)
 
     def latest(self, key: str) -> tuple[np.ndarray, np.ndarray] | None:
-        """(t, y) of the newest run for key, or None. Arrays are views: do not modify."""
+        """(t, y) of the newest run for key (recorded or calculated), or None.
+        Recorded arrays are views: do not modify."""
+        calc = self.calcs.get(key)
+        if calc is not None:
+            try:
+                return evaluate(calc.expr, lambda n: self.latest(calc.refs[n]) if n in calc.refs else None)
+            except (CalcError, RecursionError):
+                return None  # e.g. no data yet; the display just stays empty
         with self._lock:
             if not self.runs or key not in self.runs[-1].series:
                 return None
@@ -74,9 +94,11 @@ class DataManager:
     def load(self, runs: list[Run]):
         with self._lock:
             self.runs = list(runs)
+            self.calcs.clear()
             self.recording = False
 
     def clear(self):
         with self._lock:
             self.runs.clear()
+            self.calcs.clear()
             self.recording = False

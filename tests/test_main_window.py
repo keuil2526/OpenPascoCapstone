@@ -303,3 +303,76 @@ def test_scan_warnings_shown_and_rescan_closes_old(win, monkeypatch):
     win.scan_devices(wait=True)
     assert closed == [1] and "BLE 실패" in win.statusBar().currentMessage()
     assert win.scan_btn.isEnabled() and not win.scanning
+
+
+def _record_motion(win, seconds=0.25):
+    import time
+    win.scan_devices(wait=True)
+    win.rate_combo.setCurrentText("100 Hz")
+    win.toggle_record()
+    time.sleep(seconds)
+    win.toggle_record()
+
+
+def test_calculation_end_to_end(win):
+    import numpy as np
+    from core.calculation import CalcError
+    _record_motion(win)
+    calc = win.create_calc("2배 위치", "m", "[위치] * 2")
+    assert calc.refs == {"위치": "sim-motion:position"} and "calc:2배 위치" in win.known
+    t, y = win.dm.latest("calc:2배 위치")
+    assert np.allclose(y, 2 * win.dm.latest("sim-motion:position")[1])
+    page = win.pages.currentWidget()
+    graph = page.add_display("그래프")
+    graph.selector.setCurrentIndex(graph.selector.findData("calc:2배 위치"))
+    graph.refresh(win.dm)
+    assert len(graph.body.curve.getData()[0]) == len(t)
+    # chained calculation, and validation errors
+    win.create_calc("제곱", "", "[2배 위치] ** 2")
+    for name, expr, msg in [("", "[위치]", "이름"), ("위치", "[위치]", "이미 사용"),
+                            ("x", "[없는것]", "찾을 수 없"), ("y", "[위치] +", "문법"),
+                            ("z", "1 + 2", "하나 이상"), ("2배 위치", "[위치]", "이미 사용")]:
+        with pytest.raises(CalcError, match=msg):
+            win.create_calc(name, "", expr)
+
+
+def test_calculation_saved_and_restored(win, tmp_path, monkeypatch):
+    import numpy as np
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    _record_motion(win)
+    win.create_calc("v2", "", "[속도] ** 2")
+    frame = win.pages.currentWidget().add_display("숫자")
+    frame.selector.setCurrentIndex(frame.selector.findData("calc:v2"))
+    expected = win.dm.latest("calc:v2")[1][-1]
+    p = str(tmp_path / "c.opasco")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
+    win.save_experiment()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    win.new_experiment()
+    assert not win.dm.calcs
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (p, ""))
+    win.open_experiment()
+    digits = win.pages.currentWidget().displays[0]
+    assert digits.key == "calc:v2" and np.isclose(win.dm.latest("calc:v2")[1][-1], expected)
+
+
+def test_corrupt_saved_calcs_are_skipped(win):
+    bad = [{"key": "calc:a", "name": "a", "unit": "", "expr": "[x] +", "refs": {}},   # syntax error
+           {"key": "calc:b", "name": "b", "unit": "", "expr": "[x]", "refs": {"y": "k"}},  # stray ref
+           {"key": "oops"}, "junk",
+           {"key": "calc:c", "name": "c", "unit": "", "expr": "[c] + 1", "refs": {"c": "calc:c"}}]
+    assert win._restore_calcs(bad + [None]) == 5  # the self-referencing one is accepted ...
+    assert win.dm.latest("calc:c") is None  # ... but evaluating it does not crash or hang
+
+
+def test_calc_dialog_keeps_open_on_error(win):
+    from gui.widgets.calc_dialog import CalcDialog
+    win.scan_devices(wait=True)
+    dlg = CalcDialog(win, ["위치"], win.create_calc)
+    dlg.name.setText("x")
+    dlg.expr.setText("[위치] +")
+    dlg.accept()
+    assert dlg.result() == 0 and "문법" in dlg.error.text()
+    dlg.expr.setText("[위치] * 3")
+    dlg.accept()
+    assert dlg.result() == 1 and "calc:x" in win.dm.calcs

@@ -1,8 +1,10 @@
 """OpenPASCO main window: pages of displays, side tool panel, recording control bar."""
 import threading
+from dataclasses import asdict
 from pathlib import Path
 
 from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, Qt, QTimer, Signal
+import numpy as np
 import pyqtgraph as pg
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (
@@ -11,10 +13,12 @@ from PySide6.QtWidgets import (
     QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
-from core.data_manager import DataManager
+from core.calculation import CalcError, parse
+from core.data_manager import Calc, DataManager
+from gui.widgets.calc_dialog import CalcDialog
 from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
 from hardware import discovery
-from hardware.base import Sensor
+from hardware.base import Measurement, Sensor
 from storage import capstone_import, experiment_storage as storage
 
 FILE_FILTER = "OpenPASCO 실험 (*.opasco)"
@@ -179,6 +183,7 @@ class MainWindow(QMainWindow):
         self.act_rename_page = act("페이지 이름 바꾸기…",
                                    lambda: self.rename_page(self.pages.currentIndex()), "F2")
         self.act_record = act("기록 / 정지", self.toggle_record, "Ctrl+R", QStyle.SP_MediaPlay)
+        self.act_calc = act("계산 추가…", self.add_calculation, "Ctrl+L")
 
         mb = self.menuBar()
         file_menu = mb.addMenu("파일(&F)")
@@ -186,7 +191,7 @@ class MainWindow(QMainWindow):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
         page_menu = mb.addMenu("페이지(&P)")
         page_menu.addActions([self.act_add_page, self.act_rename_page])
-        mb.addMenu("측정(&M)").addAction(self.act_record)
+        mb.addMenu("측정(&M)").addActions([self.act_record, self.act_calc])
         self.view_menu = mb.addMenu("보기(&V)")
         self.act_dark = QAction("다크 모드", self, checkable=True, toggled=self.set_dark)
         self.view_menu.addAction(self.act_dark)
@@ -303,7 +308,8 @@ class MainWindow(QMainWindow):
 
     # --- files ------------------------------------------------------------
     def layout_state(self) -> dict:
-        return {"rate_index": self.rate_combo.currentIndex(), "pages": [
+        return {"rate_index": self.rate_combo.currentIndex(),
+                "calcs": [asdict(c) for c in self.dm.calcs.values()], "pages": [
             {"name": self.pages.tabText(i),
              "displays": [{"kind": f.kind, "key": f.key} for f in self.pages.widget(i).displays]}
             for i in range(self.pages.count())]}
@@ -371,9 +377,11 @@ class MainWindow(QMainWindow):
             return
         self.dm.load(runs)
         self.known = meas
+        skipped = self._restore_calcs(layout.get("calcs", []))
         self.apply_layout(layout)
         self._set_path(name)
-        self.statusBar().showMessage(f"열기: {name} — 런 {len(runs)}개")
+        self.statusBar().showMessage(f"열기: {name} — 런 {len(runs)}개"
+                                     + (f" (읽을 수 없는 계산 {skipped}개 건너뜀)" if skipped else ""))
 
     def import_cap(self):
         if self.recording:
@@ -407,6 +415,63 @@ class MainWindow(QMainWindow):
                 (f", 경고 {len(res.warnings)}건" if res.warnings else "")
         self.statusBar().showMessage(
             f"가져옴: 런 {len(res.runs)}개, 측정값 {len(res.measurements)}종{notes} (단위 정보는 가져오지 않음)")
+
+    # --- calculations -----------------------------------------------------
+    def create_calc(self, name: str, unit: str, expr: str) -> Calc:
+        """Validate and register a calculated measurement; raises CalcError with a user message."""
+        items = self.available_measurements()
+        by_name: dict[str, list[str]] = {}
+        for key, (_, m) in items.items():
+            by_name.setdefault(m.name, []).append(key)
+        if not name or any(c in name for c in "[]"):
+            raise CalcError("이름을 입력하세요 (대괄호 [ ] 는 쓸 수 없습니다)")
+        if name in by_name:
+            raise CalcError(f"'{name}' 이름은 이미 사용 중입니다")
+        _, refs = parse(expr)
+        if not refs:
+            raise CalcError("수식에 측정값을 [이름]으로 하나 이상 넣어야 합니다")
+        resolved = {}
+        for ref in refs:
+            keys = by_name.get(ref, [])
+            if not keys:
+                raise CalcError(f"측정값 '{ref}'을(를) 찾을 수 없습니다")
+            if len(keys) > 1:
+                raise CalcError(f"측정값 이름 '{ref}'이(가) 여러 개입니다. 센서 하나만 선택하세요")
+            resolved[ref] = keys[0]
+        calc = Calc(f"calc:{name}", name, unit, expr, resolved)
+        self._register_calc(calc)
+        return calc
+
+    def _register_calc(self, calc: Calc):
+        self.dm.calcs[calc.key] = calc
+        data = self.dm.latest(calc.key)
+        finite = data[1][np.isfinite(data[1])] if data is not None else []
+        lo, hi = (float(np.min(finite)), float(np.max(finite))) if len(finite) else (0.0, 10.0)
+        self.known[calc.key] = ("계산", Measurement(calc.key, calc.name, calc.unit,
+                                                    lo, hi if hi > lo else lo + 1))
+        self.update_measurements()
+
+    def _restore_calcs(self, saved) -> int:
+        """Re-register calculations from a file; returns how many entries were unusable."""
+        bad = 0
+        for d in saved if isinstance(saved, list) else []:
+            try:
+                calc = Calc(**d)
+                parse(calc.expr)
+                if not (calc.key.startswith("calc:") and set(calc.refs) <= set(parse(calc.expr)[1])):
+                    raise ValueError
+            except (TypeError, ValueError):  # CalcError is a ValueError
+                bad += 1
+                continue
+            self._register_calc(calc)
+        return bad
+
+    def add_calculation(self):
+        names = sorted({m.name for _, m in self.available_measurements().values()})
+        if not names:
+            self.statusBar().showMessage("계산할 측정값이 없습니다. 장치 검색 또는 파일 열기를 먼저 하세요.")
+            return
+        CalcDialog(self, names, self.create_calc).exec()
 
     def export_csv(self):
         runs = self.dm.runs
