@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.calculation import CalcError, parse
-from core.data_manager import Calc, DataManager
+from core.data_manager import Calc, DataManager, Run, Series
 from gui.widgets.calc_dialog import CalcDialog
 from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
 from hardware import discovery
@@ -73,6 +73,7 @@ class Page(QWidget):
     """One experiment page: displays in rows of 2, resizable with splitters."""
 
     display_added = Signal(DisplayFrame)
+    display_removed = Signal()
 
     def __init__(self):
         super().__init__()
@@ -109,6 +110,7 @@ class Page(QWidget):
         self.displays.remove(frame)
         frame.deleteLater()
         self._relayout()
+        self.display_removed.emit()
 
     def _relayout(self):
         # Rebuild splitters; addWidget reparents frames, so deleting the old tree keeps them.
@@ -141,6 +143,8 @@ class MainWindow(QMainWindow):
         self.scanning = False
         self.known: dict = {}  # key -> (sensor name, Measurement) from opened files
         self.path: Path | None = None
+        self.doc_name: str | None = None
+        self.dirty = False
 
         self.scan_done.connect(self._on_scan_done)
         self.sensor_error.connect(self._on_sensor_error)
@@ -184,6 +188,7 @@ class MainWindow(QMainWindow):
                                    lambda: self.rename_page(self.pages.currentIndex()), "F2")
         self.act_record = act("기록 / 정지", self.toggle_record, "Ctrl+R", QStyle.SP_MediaPlay)
         self.act_calc = act("계산 추가…", self.add_calculation, "Ctrl+L")
+        self.act_calc_delete = act("계산 삭제…", self.remove_calculation)
 
         mb = self.menuBar()
         file_menu = mb.addMenu("파일(&F)")
@@ -191,7 +196,7 @@ class MainWindow(QMainWindow):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
         page_menu = mb.addMenu("페이지(&P)")
         page_menu.addActions([self.act_add_page, self.act_rename_page])
-        mb.addMenu("측정(&M)").addActions([self.act_record, self.act_calc])
+        mb.addMenu("측정(&M)").addActions([self.act_record, self.act_calc, self.act_calc_delete])
         self.view_menu = mb.addMenu("보기(&V)")
         self.act_dark = QAction("다크 모드", self, checkable=True, toggled=self.set_dark)
         self.view_menu.addAction(self.act_dark)
@@ -265,6 +270,32 @@ class MainWindow(QMainWindow):
         self.elapsed = QElapsedTimer()
         self.clock = QTimer(self, interval=33, timeout=self._tick)  # ~30 fps display refresh
 
+    # --- unsaved changes ----------------------------------------------------
+    def _mark_dirty(self, *_):
+        self.dirty = True
+        self._update_title()
+
+    def _set_clean(self):
+        self.dirty = False
+        self._update_title()
+
+    def _update_title(self):
+        self.setWindowTitle(f"{'● ' if self.dirty else ''}{self.doc_name or '제목 없음'} — OpenPASCO")
+
+    def confirm_discard(self, title: str) -> bool:
+        """True if it is fine to replace the current experiment (saved, discarded or unchanged)."""
+        if self.recording:
+            self.toggle_record()
+        if not self.dirty:
+            return True
+        B = QMessageBox
+        r = B.question(self, title, "저장하지 않은 변경 사항이 있습니다. 저장할까요?",
+                       B.Save | B.Discard | B.Cancel, B.Save)
+        if r == B.Save:
+            self.save_experiment()
+            return not self.dirty  # False if the save dialog was cancelled or failed
+        return r == B.Discard
+
     # --- window state -----------------------------------------------------
     def _restore_layout(self):
         s = QSettings()
@@ -282,8 +313,9 @@ class MainWindow(QMainWindow):
         QSettings().setValue("dark", on)
 
     def closeEvent(self, event):
-        if self.recording:
-            self.toggle_record()  # stop sensor threads
+        if not self.confirm_discard("종료"):
+            event.ignore()
+            return
         for s in self.sensors:
             s.close()  # disconnect Bluetooth devices
         s = QSettings()
@@ -293,17 +325,14 @@ class MainWindow(QMainWindow):
 
     # --- actions ----------------------------------------------------------
     def new_experiment(self):
-        if self.dm.runs and QMessageBox.question(
-                self, "새 실험", "기록된 데이터가 모두 사라집니다. 계속할까요?") != QMessageBox.Yes:
+        if not self.confirm_discard("새 실험"):
             return
-        if self.recording:
-            self.toggle_record()
         self.dm.clear()
         self.known.clear()
-        self.path = None
-        self.setWindowTitle("OpenPASCO")
+        self.path = self.doc_name = None
         self.pages.clear()
         self.add_page()
+        self._set_clean()
         self.statusBar().showMessage("새 실험")
 
     # --- files ------------------------------------------------------------
@@ -334,7 +363,8 @@ class MainWindow(QMainWindow):
 
     def _set_path(self, path):
         self.path = Path(path)
-        self.setWindowTitle(f"{self.path.name} — OpenPASCO")
+        self.doc_name = self.path.name
+        self._set_clean()
 
     def save_experiment(self, as_new=False):
         if self.recording:
@@ -366,9 +396,7 @@ class MainWindow(QMainWindow):
         name, _ = QFileDialog.getOpenFileName(self, "실험 열기", "", FILE_FILTER)
         if not name:
             return
-        if self.dm.runs and QMessageBox.question(
-                self, "실험 열기", "현재 기록된 데이터가 닫힙니다(저장하지 않았다면 사라집니다). 계속할까요?"
-        ) != QMessageBox.Yes:
+        if not self.confirm_discard("실험 열기"):
             return
         try:
             runs, layout, meas = storage.load(name)
@@ -389,9 +417,7 @@ class MainWindow(QMainWindow):
         name, _ = QFileDialog.getOpenFileName(self, "Capstone 파일 가져오기", "", "Capstone 실험 (*.cap)")
         if not name:
             return
-        if self.dm.runs and QMessageBox.question(
-                self, "가져오기", "현재 기록된 데이터가 닫힙니다(저장하지 않았다면 사라집니다). 계속할까요?"
-        ) != QMessageBox.Yes:
+        if not self.confirm_discard("가져오기"):
             return
         try:
             res = capstone_import.load_cap(name)
@@ -410,7 +436,8 @@ class MainWindow(QMainWindow):
         self.known = res.measurements
         self.apply_layout({"pages": [{"name": Path(name).stem, "displays": displays}]})
         self.path = None  # an import is a new, unsaved experiment
-        self.setWindowTitle(f"{Path(name).name} (가져옴) — OpenPASCO")
+        self.doc_name = f"{Path(name).name} (가져옴)"
+        self._set_clean()
         notes = (f", 지원하지 않는 데이터 {res.skipped}개 건너뜀" if res.skipped else "") + \
                 (f", 경고 {len(res.warnings)}건" if res.warnings else "")
         self.statusBar().showMessage(
@@ -444,6 +471,7 @@ class MainWindow(QMainWindow):
 
     def _register_calc(self, calc: Calc):
         self.dm.calcs[calc.key] = calc
+        self._mark_dirty()
         data = self.dm.latest(calc.key)
         finite = data[1][np.isfinite(data[1])] if data is not None else []
         lo, hi = (float(np.min(finite)), float(np.max(finite))) if len(finite) else (0.0, 10.0)
@@ -473,18 +501,51 @@ class MainWindow(QMainWindow):
             return
         CalcDialog(self, names, self.create_calc).exec()
 
+    def delete_calc(self, key: str):
+        users = [c.name for c in self.dm.calcs.values() if c.key != key and key in c.refs.values()]
+        if users:
+            raise CalcError(f"다른 계산({', '.join(users)})에서 사용 중이라 삭제할 수 없습니다")
+        del self.dm.calcs[key]
+        self.known.pop(key, None)
+        self._mark_dirty()
+        self.update_measurements()
+
+    def remove_calculation(self):
+        calcs = {c.name: c.key for c in self.dm.calcs.values()}
+        if not calcs:
+            self.statusBar().showMessage("삭제할 계산이 없습니다.")
+            return
+        name, ok = QInputDialog.getItem(self, "계산 삭제", "삭제할 계산:", list(calcs), 0, False)
+        if ok:
+            try:
+                self.delete_calc(calcs[name])
+            except CalcError as e:
+                QMessageBox.warning(self, "삭제할 수 없음", str(e))
+
+    def _run_with_calcs(self, index: int) -> Run:
+        """A copy of run `index` that also carries every calculated measurement as a series."""
+        src = self.dm.runs[index]
+        run = Run(src.number, src.started, dict(src.series))
+        for key in self.dm.calcs:
+            s = self.dm.series(key, index)
+            if s is not None:
+                run.series[key] = Series(max(len(s[0]), 1))
+                run.series[key].extend(*s)
+        return run
+
     def export_csv(self):
         runs = self.dm.runs
         if not runs or self.recording:
             self.statusBar().showMessage("내보낼 기록이 없습니다.")
             return
-        run = runs[-1]
+        index = len(runs) - 1
         if len(runs) > 1:
             labels = [f"런 #{r.number}" for r in runs]
             label, ok = QInputDialog.getItem(self, "CSV 내보내기", "내보낼 런:", labels, len(labels) - 1, False)
             if not ok:
                 return
-            run = runs[labels.index(label)]
+            index = labels.index(label)
+        run = self._run_with_calcs(index)
         name, _ = QFileDialog.getSaveFileName(self, "CSV 내보내기", f"런{run.number}.csv", "CSV (*.csv)")
         if not name:
             return
@@ -498,6 +559,9 @@ class MainWindow(QMainWindow):
     def add_page(self) -> Page:
         page = Page()
         page.display_added.connect(self._init_display)
+        page.display_added.connect(self._mark_dirty)
+        page.display_removed.connect(self._mark_dirty)
+        self._mark_dirty()
         idx = self.pages.addTab(page, f"페이지 {self.pages.count() + 1}")
         self.pages.setCurrentIndex(idx)
         return page
@@ -508,11 +572,13 @@ class MainWindow(QMainWindow):
         name, ok = QInputDialog.getText(self, "페이지 이름", "새 이름:", text=self.pages.tabText(index))
         if ok and name.strip():
             self.pages.setTabText(index, name.strip())
+            self._mark_dirty()
 
     def close_page(self, index: int):
         if self.pages.count() > 1:  # always keep one page
             self.pages.widget(index).deleteLater()
             self.pages.removeTab(index)
+            self._mark_dirty()
 
     def add_display(self, kind: str):
         self.pages.currentWidget().add_display(kind)
@@ -602,6 +668,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("기록할 센서가 없습니다. '장치 검색' 후 센서를 선택하세요.")
                 return
             run = self.dm.start_run()
+            self._mark_dirty()
             rate = SAMPLE_RATES_HZ[self.rate_combo.currentIndex()]
             self.running_sensors = sensors
             for sensor in sensors:

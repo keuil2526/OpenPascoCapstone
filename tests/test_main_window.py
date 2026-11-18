@@ -23,6 +23,7 @@ def win(monkeypatch):
     app.setOrganizationName("OpenPASCO-test")
     w = MainWindow()
     yield w
+    w.dirty = False  # closing a modified window would open a modal prompt
     w.close()
 
 
@@ -62,7 +63,7 @@ def test_record_toggle_locks_rate(win):
 
 def test_new_experiment_resets(win, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
     win.scan_devices(wait=True)
     win.add_page()
     win.toggle_record()
@@ -137,7 +138,7 @@ def test_meter_paints_without_error(win, capfd, value):
 
 def test_new_experiment_cancel_keeps_data(win, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Cancel)
     win.scan_devices(wait=True)
     win.toggle_record()
     win.toggle_record()
@@ -194,7 +195,7 @@ def test_save_open_roundtrip(win, tmp_path, monkeypatch):
     assert win.path.name == "e.opasco" and "e.opasco" in win.windowTitle()
     n = len(win.dm.latest("sim-motion:position")[0])
 
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
     win.new_experiment()
     assert not win.dm.runs and win.path is None
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (p, ""))
@@ -212,7 +213,7 @@ def test_open_bad_file_keeps_state(win, tmp_path, monkeypatch):
     bad.write_bytes(b"junk")
     _record_a_bit(win)
     shown = []
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: shown.append(a[2]))
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(bad), ""))
     win.open_experiment()
@@ -347,7 +348,7 @@ def test_calculation_saved_and_restored(win, tmp_path, monkeypatch):
     p = str(tmp_path / "c.opasco")
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
     win.save_experiment()
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
     win.new_experiment()
     assert not win.dm.calcs
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (p, ""))
@@ -409,3 +410,90 @@ def test_older_runs_with_calc_and_missing_data(win):
     older = win.dm.older_runs("calc:c2")
     assert [n for n, _, _ in older] == [1]
     assert win.dm.older_runs("sim-temp:nonexistent") == [] and win.dm.series("x", 99) is None
+
+
+def test_dirty_flag_lifecycle(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    assert not win.dirty and win.windowTitle() == "제목 없음 — OpenPASCO"
+    win.add_page()
+    assert win.dirty and win.windowTitle().startswith("● ")
+    p = str(tmp_path / "d.opasco")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
+    win.save_experiment()
+    assert not win.dirty and win.windowTitle() == "d.opasco — OpenPASCO"
+    for change in (lambda: win.pages.currentWidget().add_display("숫자"),
+                   lambda: win.pages.currentWidget().remove_display(win.pages.currentWidget().displays[0]),
+                   lambda: win.close_page(1)):
+        win._set_clean()
+        change()
+        assert win.dirty, change
+
+
+def test_discard_prompt_save_discard_cancel(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    win.add_page()  # now dirty
+    answers = iter([QMessageBox.Cancel, QMessageBox.Discard, QMessageBox.Save])
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: next(answers))
+    assert not win.confirm_discard("t") and win.dirty  # cancel
+    assert win.confirm_discard("t") and win.dirty  # discard: caller proceeds, state untouched
+    p = str(tmp_path / "s.opasco")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
+    assert win.confirm_discard("t") and not win.dirty and (tmp_path / "s.opasco").exists()  # save
+    win.add_page()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Save)
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))  # user cancels the file dialog
+    win.path = None
+    assert not win.confirm_discard("t")  # Save chosen but not completed -> do not proceed
+
+
+def test_close_event_respects_cancel(win, monkeypatch):
+    from PySide6.QtGui import QCloseEvent
+    from PySide6.QtWidgets import QMessageBox
+    win.add_page()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Cancel)
+    ev = QCloseEvent()
+    win.closeEvent(ev)
+    assert not ev.isAccepted()
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
+    ev = QCloseEvent()
+    win.closeEvent(ev)
+    assert ev.isAccepted()
+
+
+def test_confirm_discard_stops_recording(win, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
+    win.scan_devices(wait=True)
+    win.toggle_record()
+    assert win.confirm_discard("t") and not win.recording
+
+
+def test_delete_calc_and_dependents(win):
+    from core.calculation import CalcError
+    _record_motion(win)
+    win.create_calc("a", "", "[위치] * 2")
+    win.create_calc("b", "", "[a] + 1")
+    frame = win.pages.currentWidget().add_display("숫자")
+    frame.selector.setCurrentIndex(frame.selector.findData("calc:a"))
+    with pytest.raises(CalcError, match="b"):
+        win.delete_calc("calc:a")  # b depends on a
+    win.delete_calc("calc:b")
+    win.delete_calc("calc:a")
+    assert not win.dm.calcs and "calc:a" not in win.known
+    assert frame.key == "sim-motion:position"  # display fell back to a recorded measurement
+
+
+def test_csv_includes_calculations(win, tmp_path, monkeypatch):
+    import csv
+    from PySide6.QtWidgets import QFileDialog
+    _record_motion(win)
+    win.create_calc("두배", "m", "[위치] * 2")
+    p = str(tmp_path / "c.csv")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
+    win.export_csv()
+    rows = list(csv.reader(open(p, encoding="utf-8-sig")))
+    hdr = rows[0]
+    pos, dbl = hdr.index("위치 (m)"), hdr.index("두배 (m)")
+    first = rows[5]
+    assert float(first[dbl]) == pytest.approx(2 * float(first[pos]), rel=1e-6)
+    assert len(win.dm.runs[-1].series) == 3 and not any("calc" in k for k in win.dm.runs[-1].series)  # run untouched
