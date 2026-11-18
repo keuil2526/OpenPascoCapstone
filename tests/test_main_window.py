@@ -166,3 +166,61 @@ def test_unchecked_sensor_not_recorded(win):
     win.toggle_record()
     win.toggle_record()
     assert all(not k.startswith("sim-temp") for k in win.dm.runs[-1].series)
+
+
+def _record_a_bit(win):
+    import time
+    win.scan_devices()
+    win.rate_combo.setCurrentText("100 Hz")
+    page = win.pages.currentWidget()
+    page.add_display("그래프")
+    page.add_display("숫자").selector.setCurrentIndex(2)
+    win.toggle_record()
+    time.sleep(0.2)
+    win.toggle_record()
+
+
+def test_save_open_roundtrip(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    p = str(tmp_path / "e.opasco")
+    _record_a_bit(win)
+    win.pages.setTabText(0, "내 실험")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
+    win.save_experiment()
+    assert win.path.name == "e.opasco" and "e.opasco" in win.windowTitle()
+    n = len(win.dm.latest("sim-motion:position")[0])
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    win.new_experiment()
+    assert not win.dm.runs and win.path is None
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (p, ""))
+    win.open_experiment()  # no sensors scanned: file must open on its own
+    assert win.pages.tabText(0) == "내 실험" and win.rate_combo.currentText() == "100 Hz"
+    graph, digits = win.pages.currentWidget().displays
+    assert graph.key == "sim-motion:position" and digits.key == "sim-temp:temperature"
+    assert len(graph.body.curve.getData()[0]) == n
+    assert digits.body.value.text() != "— — —"
+
+
+def test_open_bad_file_keeps_state(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    bad = tmp_path / "bad.opasco"
+    bad.write_bytes(b"junk")
+    _record_a_bit(win)
+    shown = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: shown.append(a[2]))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(bad), ""))
+    win.open_experiment()
+    assert shown and len(win.dm.runs) == 1
+
+
+def test_export_csv(win, tmp_path, monkeypatch):
+    import csv
+    from PySide6.QtWidgets import QFileDialog
+    _record_a_bit(win)
+    p = str(tmp_path / "r.csv")
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
+    win.export_csv()
+    rows = list(csv.reader(open(p, encoding="utf-8-sig")))
+    assert "위치 (m)" in rows[0] and len(rows) > 10

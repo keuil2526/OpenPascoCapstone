@@ -1,9 +1,11 @@
 """OpenPASCO main window: pages of displays, side tool panel, recording control bar."""
+from pathlib import Path
+
 from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, Qt, QTimer, Signal
 import pyqtgraph as pg
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDockWidget, QHBoxLayout, QInputDialog,
+    QAbstractItemView, QApplication, QFileDialog, QComboBox, QDockWidget, QHBoxLayout, QInputDialog,
     QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter, QStyle,
     QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
@@ -12,7 +14,9 @@ from core.data_manager import DataManager
 from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
 from hardware import simulated
 from hardware.base import Sensor
+from storage import experiment_storage as storage
 
+FILE_FILTER = "OpenPASCO 실험 (*.opasco)"
 SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 GRID_COLUMNS = 2
 DISPLAY_MIME = "application/x-openpasco-display"
@@ -126,6 +130,8 @@ class MainWindow(QMainWindow):
         self.recording = False
         self.dm = DataManager()
         self.sensors: list[Sensor] = []
+        self.known: dict = {}  # key -> (sensor name, Measurement) from opened files
+        self.path: Path | None = None
 
         self.pages = QTabWidget(tabsClosable=True, movable=True, documentMode=True)
         self.pages.tabCloseRequested.connect(self.close_page)
@@ -155,9 +161,11 @@ class MainWindow(QMainWindow):
             return a
 
         self.act_new = act("새 실험", self.new_experiment, QKeySequence.New, QStyle.SP_FileIcon)
-        self.act_open = act("열기…", self.not_ready, QKeySequence.Open, QStyle.SP_DialogOpenButton)
-        self.act_save = act("저장", self.not_ready, QKeySequence.Save, QStyle.SP_DialogSaveButton)
-        self.act_export = act("CSV 내보내기…", self.not_ready)
+        self.act_open = act("열기…", self.open_experiment, QKeySequence.Open, QStyle.SP_DialogOpenButton)
+        self.act_save = act("저장", self.save_experiment, QKeySequence.Save, QStyle.SP_DialogSaveButton)
+        self.act_save_as = act("다른 이름으로 저장…", lambda: self.save_experiment(as_new=True),
+                               QKeySequence.SaveAs)
+        self.act_export = act("CSV 내보내기…", self.export_csv)
         self.act_quit = act("종료", self.close, QKeySequence.Quit)
         self.act_add_page = act("페이지 추가", self.add_page, "Ctrl+T", QStyle.SP_FileDialogNewFolder)
         self.act_rename_page = act("페이지 이름 바꾸기…",
@@ -166,7 +174,7 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()
         file_menu = mb.addMenu("파일(&F)")
-        for a in (self.act_new, self.act_open, self.act_save, None, self.act_export, None, self.act_quit):
+        for a in (self.act_new, self.act_open, self.act_save, self.act_save_as, None, self.act_export, None, self.act_quit):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
         page_menu = mb.addMenu("페이지(&P)")
         page_menu.addActions([self.act_add_page, self.act_rename_page])
@@ -276,9 +284,108 @@ class MainWindow(QMainWindow):
         if self.recording:
             self.toggle_record()
         self.dm.clear()
+        self.known.clear()
+        self.path = None
+        self.setWindowTitle("OpenPASCO")
         self.pages.clear()
         self.add_page()
         self.statusBar().showMessage("새 실험")
+
+    # --- files ------------------------------------------------------------
+    def layout_state(self) -> dict:
+        return {"rate_index": self.rate_combo.currentIndex(), "pages": [
+            {"name": self.pages.tabText(i),
+             "displays": [{"kind": f.kind, "key": f.key} for f in self.pages.widget(i).displays]}
+            for i in range(self.pages.count())]}
+
+    def apply_layout(self, layout: dict):
+        self.pages.clear()
+        for pg_state in layout.get("pages") or [{"name": "페이지 1", "displays": []}]:
+            page = self.add_page()
+            self.pages.setTabText(self.pages.indexOf(page), pg_state["name"])
+            for d in pg_state["displays"]:
+                if d["kind"] not in DISPLAY_TYPES:
+                    continue  # file from a newer version; skip unknown display
+                frame = page.add_display(d["kind"])
+                idx = frame.selector.findData(d["key"])
+                if idx >= 0:
+                    frame.selector.setCurrentIndex(idx)
+                frame.refresh(self.dm)
+        self.pages.setCurrentIndex(0)
+        rate = layout.get("rate_index")
+        if isinstance(rate, int) and 0 <= rate < self.rate_combo.count():
+            self.rate_combo.setCurrentIndex(rate)
+
+    def _set_path(self, path):
+        self.path = Path(path)
+        self.setWindowTitle(f"{self.path.name} — OpenPASCO")
+
+    def save_experiment(self, as_new=False):
+        if self.recording:
+            return
+        path = self.path
+        if as_new or path is None:
+            name, _ = QFileDialog.getSaveFileName(self, "실험 저장", str(path or "실험.opasco"), FILE_FILTER)
+            if not name:
+                return
+            path = Path(name).with_suffix(".opasco")
+        used = {k for r in self.dm.runs for k in r.series}
+        meas = {k: v for k, v in self._all_measurements().items() if k in used}
+        try:
+            storage.save(path, self.dm.runs, self.layout_state(), meas)
+        except (OSError, TypeError) as e:
+            QMessageBox.critical(self, "저장 실패", str(e))
+            return
+        self._set_path(path)
+        self.statusBar().showMessage(f"저장됨: {path}")
+
+    def _all_measurements(self):
+        items = dict(self.known)
+        items.update({f"{s.id}:{m.id}": (s.name, m) for s in self.sensors for m in s.measurements})
+        return items
+
+    def open_experiment(self):
+        if self.recording:
+            return
+        name, _ = QFileDialog.getOpenFileName(self, "실험 열기", "", FILE_FILTER)
+        if not name:
+            return
+        if self.dm.runs and QMessageBox.question(
+                self, "실험 열기", "현재 기록된 데이터가 닫힙니다(저장하지 않았다면 사라집니다). 계속할까요?"
+        ) != QMessageBox.Yes:
+            return
+        try:
+            runs, layout, meas = storage.load(name)
+        except (ValueError, OSError) as e:
+            QMessageBox.critical(self, "열기 실패", str(e))
+            return
+        self.dm.load(runs)
+        self.known = meas
+        self.apply_layout(layout)
+        self._set_path(name)
+        self.statusBar().showMessage(f"열기: {name} — 런 {len(runs)}개")
+
+    def export_csv(self):
+        runs = self.dm.runs
+        if not runs or self.recording:
+            self.statusBar().showMessage("내보낼 기록이 없습니다.")
+            return
+        run = runs[-1]
+        if len(runs) > 1:
+            labels = [f"런 #{r.number}" for r in runs]
+            label, ok = QInputDialog.getItem(self, "CSV 내보내기", "내보낼 런:", labels, len(labels) - 1, False)
+            if not ok:
+                return
+            run = runs[labels.index(label)]
+        name, _ = QFileDialog.getSaveFileName(self, "CSV 내보내기", f"런{run.number}.csv", "CSV (*.csv)")
+        if not name:
+            return
+        try:
+            storage.export_csv(name, run, self._all_measurements())
+        except OSError as e:
+            QMessageBox.critical(self, "내보내기 실패", str(e))
+            return
+        self.statusBar().showMessage(f"CSV 저장됨: {name}")
 
     def add_page(self) -> Page:
         page = Page()
@@ -325,7 +432,9 @@ class MainWindow(QMainWindow):
                 if self.device_list.item(i).checkState() == Qt.Checked]
 
     def available_measurements(self):
-        return {f"{s.id}:{m.id}": (s.name, m) for s in self.active_sensors() for m in s.measurements}
+        items = dict(self.known)
+        items.update({f"{s.id}:{m.id}": (s.name, m) for s in self.active_sensors() for m in s.measurements})
+        return items
 
     def all_frames(self):
         return [f for i in range(self.pages.count()) for f in self.pages.widget(i).displays]

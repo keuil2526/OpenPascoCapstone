@@ -26,6 +26,7 @@ class DisplayFrame(QFrame):
         super().__init__()
         self.setFrameShape(QFrame.StyledPanel)
         self.body = body
+        self.kind = title
         self.measurements: dict[str, Measurement] = {}
 
         header = QHBoxLayout()

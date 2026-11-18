@@ -71,6 +71,11 @@ class DataManager:
                 return None
             return self.runs[-1].series[key].view()
 
+    def load(self, runs: list[Run]):
+        with self._lock:
+            self.runs = list(runs)
+            self.recording = False
+
     def clear(self):
         with self._lock:
             self.runs.clear()
