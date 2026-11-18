@@ -28,6 +28,10 @@ class DisplayFrame(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self.body = body
         self.kind = title
+        self._older_sig = None
+        self._dm = None
+        if hasattr(body, "older_toggled"):
+            body.older_toggled.connect(self._older_toggled)
         self.measurements: dict[str, Measurement] = {}
 
         header = QHBoxLayout()
@@ -69,9 +73,25 @@ class DisplayFrame(QFrame):
         self.selector.blockSignals(False)
         self.body.show(self.measurement, None)
 
+    def _older_toggled(self):
+        self._older_sig = None
+        if self._dm is not None:
+            self.refresh(self._dm)
+
     def refresh(self, data_manager):
-        if self.key is not None:
-            self.body.show(self.measurement, data_manager.latest(self.key))
+        self._dm = data_manager
+        if self.key is None:
+            return
+        self.body.show(self.measurement, data_manager.latest(self.key))
+        if getattr(self.body, "wants_older", False):
+            # older runs never change while recording: refetch only when the run set or selection changes
+            sig = (self.key, tuple(id(r) for r in data_manager.runs))
+            if sig != self._older_sig:
+                self._older_sig = sig
+                self.body.show_older(data_manager.older_runs(self.key))
+        elif hasattr(self.body, "show_older"):
+            self._older_sig = None
+            self.body.show_older([])
 
 
 def style_plot(plot: pg.PlotWidget):
@@ -88,6 +108,7 @@ def style_plot(plot: pg.PlotWidget):
 class GraphDisplay(QWidget):
     """Plot with optional range selection and analysis (stats, fits, derivative, integral)."""
 
+    older_toggled = Signal()  # DisplayFrame reacts by refetching data
     ANALYSES = ["분석 없음", "통계", *MODELS, "미분", "적분"]
     DEBOUNCE_MS = 400  # analysis runs at most this often while data streams in
 
@@ -106,11 +127,16 @@ class GraphDisplay(QWidget):
         self.region.setVisible(False)
         self.plot.addItem(self.region)
 
+        self.legend = self.plot.addLegend(offset=(-10, 10))
+        self.older: list[pg.PlotDataItem] = []
+        self.older_names: list[str] = []
+        self.older_check = QCheckBox("이전 런 겹쳐보기")
         self.range_check = QCheckBox("구간 선택")
         self.analysis = QComboBox()
         self.analysis.addItems(self.ANALYSES)
         self.result = QLabel("", wordWrap=True, textInteractionFlags=Qt.TextSelectableByMouse)
         bar = QHBoxLayout()
+        bar.addWidget(self.older_check)
         bar.addWidget(self.range_check)
         bar.addWidget(self.analysis)
         bar.addStretch()
@@ -124,8 +150,33 @@ class GraphDisplay(QWidget):
         self.data = None
         self.timer = QTimer(self, singleShot=True, interval=self.DEBOUNCE_MS, timeout=self._analyze)
         self.range_check.toggled.connect(self._range_toggled)
+        self.older_check.toggled.connect(lambda _: self.older_toggled.emit())
         self.region.sigRegionChanged.connect(self._schedule)
         self.analysis.currentIndexChanged.connect(lambda _: self._analyze())
+
+    @property
+    def wants_older(self) -> bool:
+        return self.older_check.isChecked()
+
+    def show_older(self, runs):
+        """runs: [(run number, t, y)] drawn faded behind the newest run (analysis uses the newest only)."""
+        for item in self.older:
+            self.plot.removeItem(item)
+        self.older = []
+        names = [f"런 #{n}" for n, _, _ in runs]
+        if names != self.older_names:  # rebuild the legend only when the run set changed
+            self.legend.clear()
+            self.older_names = names
+            rebuild = True
+        else:
+            rebuild = False
+        for i, (n, t, y) in enumerate(runs):
+            item = self.plot.plot(t, y, pen=pg.mkPen(pg.intColor(i, hues=9, alpha=170), width=1.5))
+            self.older.append(item)
+            if rebuild:
+                self.legend.addItem(item, names[i])
+        if rebuild and runs:
+            self.legend.addItem(self.curve, "최신 런")
 
     def _range_toggled(self, on):
         self.region.setVisible(on)

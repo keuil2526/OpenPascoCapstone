@@ -376,3 +376,36 @@ def test_calc_dialog_keeps_open_on_error(win):
     dlg.expr.setText("[위치] * 3")
     dlg.accept()
     assert dlg.result() == 1 and "calc:x" in win.dm.calcs
+
+
+def test_overlay_older_runs(win):
+    import time
+    win.scan_devices(wait=True)
+    win.rate_combo.setCurrentText("100 Hz")
+    frame = win.pages.currentWidget().add_display("그래프")
+    g = frame.body
+    for _ in range(3):  # three runs
+        win.toggle_record()
+        time.sleep(0.12)
+        win.toggle_record()
+    assert len(win.dm.runs) == 3 and g.older == []  # off by default
+    g.older_check.setChecked(True)  # frame refetches immediately
+    assert len(g.older) == 2 and g.older_names == ["런 #1", "런 #2"]
+    n_newest = len(win.dm.latest(frame.key)[0])
+    assert len(g.curve.getData()[0]) == n_newest
+    g.older_check.setChecked(False)
+    assert g.older == [] and g.older_names == []
+
+
+def test_older_runs_with_calc_and_missing_data(win):
+    import time
+    win.scan_devices(wait=True)
+    win.rate_combo.setCurrentText("100 Hz")
+    for i in range(2):
+        win.toggle_record()
+        time.sleep(0.1)
+        win.toggle_record()
+    win.create_calc("c2", "", "[위치] * 2")
+    older = win.dm.older_runs("calc:c2")
+    assert [n for n, _, _ in older] == [1]
+    assert win.dm.older_runs("sim-temp:nonexistent") == [] and win.dm.series("x", 99) is None

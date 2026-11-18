@@ -77,19 +77,35 @@ class DataManager:
                 return  # late samples after stop are dropped
             self.runs[-1].series.setdefault(key, Series()).extend(t, y)
 
-    def latest(self, key: str) -> tuple[np.ndarray, np.ndarray] | None:
-        """(t, y) of the newest run for key (recorded or calculated), or None.
+    def series(self, key: str, run_index: int = -1) -> tuple[np.ndarray, np.ndarray] | None:
+        """(t, y) of one run for key (recorded or calculated), or None.
         Recorded arrays are views: do not modify."""
         calc = self.calcs.get(key)
         if calc is not None:
             try:
-                return evaluate(calc.expr, lambda n: self.latest(calc.refs[n]) if n in calc.refs else None)
+                return evaluate(calc.expr, lambda n: self.series(calc.refs[n], run_index)
+                                if n in calc.refs else None)
             except (CalcError, RecursionError):
                 return None  # e.g. no data yet; the display just stays empty
         with self._lock:
-            if not self.runs or key not in self.runs[-1].series:
+            if not -len(self.runs) <= run_index < len(self.runs):
                 return None
-            return self.runs[-1].series[key].view()
+            s = self.runs[run_index].series.get(key)
+            return s.view() if s else None
+
+    def latest(self, key: str):
+        return self.series(key, -1)
+
+    def older_runs(self, key: str) -> list[tuple[int, np.ndarray, np.ndarray]]:
+        """(run number, t, y) for every run before the newest one that has data for key."""
+        with self._lock:
+            runs = list(self.runs[:-1])
+        out = []
+        for i, run in enumerate(runs):
+            s = self.series(key, i)
+            if s is not None and len(s[0]):
+                out.append((run.number, *s))
+        return out
 
     def load(self, runs: list[Run]):
         with self._lock:
