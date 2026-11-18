@@ -57,3 +57,13 @@ def test_requires_a_measurement_and_data():
         calc("[없는 측정값] + 1")
     with pytest.raises(CalcError, match="없습니다"):
         evaluate("[위치]", lambda n: (np.empty(0), np.empty(0)))
+
+
+def test_split_assignment_and_constants():
+    from openpasco.core.calculation import CalcError, split_assignment, substitute
+    assert split_assignment("y = m*x + b") == ("y", "m*x + b")
+    for bad in ("y", "= 3", "t = 3", "pi = 3", "sin = 1", "y == 3", "2x = 1"):
+        with pytest.raises(CalcError):
+            split_assignment(bad)
+    assert substitute("m * [m 속도] + b", {"m": 3.0, "b": 20.0}) == "(3.0) * [m 속도] + (20.0)"
+    assert substitute("mm + m2 + m(1)", {"m": 3.0}) == "mm + m2 + m(1)"  # whole names only

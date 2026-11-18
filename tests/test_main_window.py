@@ -367,16 +367,22 @@ def test_corrupt_saved_calcs_are_skipped(win):
 
 
 def test_calc_dialog_keeps_open_on_error(win):
+    from PySide6.QtWidgets import QTableWidgetItem
     from openpasco.gui.widgets.calc_dialog import CalcDialog
     win.scan_devices(wait=True)
     dlg = CalcDialog(win, ["위치"], win.create_calc)
-    dlg.name.setText("x")
-    dlg.expr.setText("[위치] +")
+
+    def line(row, text, unit=""):
+        dlg.table.setItem(row, 0, QTableWidgetItem(text))
+        dlg.table.setItem(row, 1, QTableWidgetItem(unit))
+
+    line(0, "x = [위치] +")
     dlg.accept()
-    assert dlg.result() == 0 and "문법" in dlg.error.text()
-    dlg.expr.setText("[위치] * 3")
+    assert dlg.result() == 0 and "문법" in dlg.status.text() and "1번째" in dlg.status.text()
+    line(0, "k = 3")  # a constant line, used by the next line
+    line(1, "x = k * [위치]", "m")
     dlg.accept()
-    assert dlg.result() == 1 and "calc:x" in win.dm.calcs
+    assert dlg.result() == 1 and "calc:x" in win.dm.calcs and "(3.0)" in win.dm.calcs["calc:x"].expr
 
 
 def test_overlay_older_runs(win):
@@ -499,22 +505,55 @@ def test_csv_includes_calculations(win, tmp_path, monkeypatch):
     assert len(win.dm.runs[-1].series) == 3 and not any("calc" in k for k in win.dm.runs[-1].series)  # run untouched
 
 
-def test_recording_conditions_auto_stop(win, monkeypatch):
-    import time
-    from PySide6.QtWidgets import QInputDialog
-    monkeypatch.setattr(QInputDialog, "getDouble", lambda *a, **k: (0.2, True))
+def _set_conditions(win, monkeypatch, conds):
+    from PySide6.QtWidgets import QDialog
+    from openpasco.gui import main_window as mw
+    monkeypatch.setattr(mw.ConditionsDialog, "exec", lambda self: QDialog.Accepted)
+    monkeypatch.setattr(mw.ConditionsDialog, "result_conditions", lambda self: conds)
     win.set_recording_conditions()
-    assert win.stop_after == 0.2
-    win.scan_devices(wait=True)
-    win.toggle_record()
-    end = time.time() + 2
+
+
+def _wait_stopped(win, seconds=3):
+    import time
+    end = time.time() + seconds
     while win.recording and time.time() < end:  # the clock timer must stop it
         QApplication.processEvents()
         time.sleep(0.01)
+
+
+def test_recording_conditions_auto_stop(win, monkeypatch):
+    from openpasco.core.conditions import Condition, Conditions
+    _set_conditions(win, monkeypatch, Conditions(stop=Condition("time", value=0.2)))
+    assert win.stop_after == 0.2
+    win.scan_devices(wait=True)
+    win.toggle_record()
+    _wait_stopped(win, 2)
     assert not win.recording and len(win.dm.runs) == 1
-    monkeypatch.setattr(QInputDialog, "getDouble", lambda *a, **k: (0.0, True))
-    win.set_recording_conditions()
+    _set_conditions(win, monkeypatch, Conditions())
     assert win.stop_after is None
+
+
+def test_stop_condition_on_measurement(win, monkeypatch):
+    from openpasco.core.conditions import Condition, Conditions
+    win.scan_devices(wait=True)
+    key = "sim-motion:position"
+    _set_conditions(win, monkeypatch, Conditions(stop=Condition("measure", key, ">", -1e9)))  # always true
+    win.toggle_record()
+    _wait_stopped(win)
+    assert not win.recording and len(win.dm.runs) == 1
+
+
+def test_start_condition_zeroes_time(win, monkeypatch):
+    import time
+    from openpasco.core.conditions import Condition, Conditions
+    win.scan_devices(wait=True)
+    key = "sim-motion:position"
+    _set_conditions(win, monkeypatch, Conditions(start=Condition("measure", key, ">", -1e9)))
+    win.toggle_record()
+    time.sleep(0.3)
+    win.toggle_record()
+    t, _ = win.dm.series(key)
+    assert len(t) and t[0] == pytest.approx(0.0, abs=0.2) and (t >= 0).all()
 
 
 def test_delete_last_run_and_numbering(win, monkeypatch):
@@ -562,3 +601,15 @@ def test_open_dispatches_cap_to_import(win, tmp_path, monkeypatch):
     monkeypatch.setattr(mw.QFileDialog, "getOpenFileName", lambda *a, **k: (str(cap), ""))
     win.open_experiment()
     assert "가져옴" in win.windowTitle() and win.path is None
+
+
+def test_start_cards(win, monkeypatch):
+    page = win.pages.currentWidget()
+    assert page.hint.isVisibleTo(page)
+    win.on_start_card("sensor", page.hint)  # graph + table, and a device search
+    assert [f.kind for f in page.displays] == ["그래프", "테이블"] and not page.hint.isVisibleTo(page)
+    win.scan_devices(wait=True)
+    called = []
+    monkeypatch.setattr(win, "open_experiment", lambda: called.append(1))
+    win.on_start_card("open", page.hint)
+    assert called

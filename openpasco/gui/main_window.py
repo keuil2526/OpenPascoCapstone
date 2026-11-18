@@ -9,7 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDockWidget, QFileDialog, QHBoxLayout,
-    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
+    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
     QFrame, QPushButton, QSplitter, QStyle, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -18,7 +18,10 @@ from openpasco.core.calculation import CalcError, parse
 from openpasco.core.data_manager import Calc, DataManager, Run, Series
 from openpasco.gui import icons
 from openpasco.gui.theme import CHROME_QSS
+from openpasco.core.conditions import Conditions, Gate
 from openpasco.gui.widgets.calc_dialog import CalcDialog
+from openpasco.gui.widgets.conditions_dialog import ConditionsDialog
+from openpasco.gui.widgets.start_cards import StartCards
 from openpasco.gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
 from openpasco.hardware import discovery
 from openpasco.hardware.base import Measurement, Sensor
@@ -78,6 +81,7 @@ class Page(QWidget):
 
     display_added = Signal(DisplayFrame)
     display_removed = Signal()
+    start_requested = Signal(str, QWidget)  # start-card id, button
 
     def __init__(self):
         super().__init__()
@@ -86,9 +90,8 @@ class Page(QWidget):
         self.setAcceptDrops(True)
         self.box = QVBoxLayout(self)
         self.displays: list[DisplayFrame] = []
-        self.hint = QLabel("왼쪽 '디스플레이' 목록에서 항목을 끌어다 놓거나 더블클릭하여 추가하세요.",
-                           alignment=Qt.AlignCenter)
-        self.hint.setStyleSheet("color: gray; font-size: 14px;")
+        self.hint = StartCards()  # empty-page start screen
+        self.hint.chosen.connect(self.start_requested)
         self.splitter = QSplitter(Qt.Vertical)
         self.box.addWidget(self.hint)
         self.box.addWidget(self.splitter)
@@ -248,24 +251,34 @@ class MainWindow(QMainWindow):
             pl.addWidget(b)
             return b
 
-        self.hw_btn = tool("하드웨어\n설정", "hardware", lambda on: self.hw_panel.setVisible(on), True)
+        self.hw_btn = tool("하드웨어\n설정", "hardware", self._toggle_hw_panel, True)
         tool("데이터\n요약", "summary", self.show_data_summary)
         tool("계산기", "calculator", self.add_calculation)
         pl.addStretch()
 
         self.hw_panel = QWidget(objectName="hw_panel")
         hl = QVBoxLayout(self.hw_panel)
-        hl.setContentsMargins(4, 6, 6, 6)
-        hl.addWidget(QLabel("<b>하드웨어 설정</b>"))
-        self.device_list = QListWidget()
-        self.device_list.addItem("연결된 장치 없음 — '장치 검색'을 누르세요")
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(0)
+        hl.addWidget(QLabel("하드웨어 설정", objectName="panel_title"))
+        status_row = QWidget(objectName="hw_status_row")
+        sr = QHBoxLayout(status_row)
+        sr.setContentsMargins(8, 6, 6, 6)
+        self.hw_status = QLabel("장치를 검색하려면 오른쪽 버튼을 누르세요", objectName="hw_status")
+        sr.addWidget(self.hw_status, 1)
+        self.scan_btn = QToolButton(objectName="action_btn", toolTip="장치 검색", text="검색")
+        self.scan_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.scan_btn.clicked.connect(lambda: self.scan_devices())
+        sr.addWidget(self.scan_btn)
+        hl.addWidget(status_row)
+        self.hw_hint = QLabel("연결된 장치가 없습니다. 인터페이스나 무선 장치를 연결하세요.", objectName="hw_hint")
+        hl.addWidget(self.hw_hint)
+        self.device_list = QListWidget(objectName="device_list")
+        self.device_list.addItem("연결된 장치 없음 — 검색 버튼을 누르세요")
         self.device_list.setEnabled(False)
         self.device_list.itemChanged.connect(lambda _: self.update_measurements())
         hl.addWidget(self.device_list, 1)
-        self.scan_btn = QPushButton("장치 검색", clicked=self.scan_devices)
-        self.scan_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
-        hl.addWidget(self.scan_btn)
-        self.hw_panel.setFixedWidth(210)
+        self.hw_panel.setFixedWidth(330)
         self.hw_panel.setVisible(False)
 
         left = QWidget(objectName="palette")
@@ -288,6 +301,11 @@ class MainWindow(QMainWindow):
         right.setWidget(self.display_list)
         self.addDockWidget(Qt.RightDockWidgetArea, right)
         self.view_menu.addAction(right.toggleViewAction())
+
+    def _toggle_hw_panel(self, on: bool):
+        self.hw_panel.setVisible(on)
+        if on and not self.sensors and not self.scanning and not self.recording:
+            self.scan_devices()  # like Capstone, searching starts when the panel opens
 
     def _build_control_bar(self):
         bar = QToolBar("측정 제어", movable=False, objectName="control_bar")
@@ -337,7 +355,8 @@ class MainWindow(QMainWindow):
         bar.addWidget(container)
         self.addToolBar(Qt.BottomToolBarArea, bar)
 
-        self.stop_after: float | None = None  # seconds; None = record until stopped
+        self.conditions = Conditions()  # start / stop conditions (not saved in files)
+        self.gate: Gate | None = None
         self.elapsed = QElapsedTimer()
         self.clock = QTimer(self, interval=33, timeout=self._tick)  # ~30 fps display refresh
 
@@ -638,10 +657,31 @@ class MainWindow(QMainWindow):
         page.display_added.connect(self._init_display)
         page.display_added.connect(self._mark_dirty)
         page.display_removed.connect(self._mark_dirty)
+        page.start_requested.connect(self.on_start_card)
         self._mark_dirty()
         idx = self.pages.addTab(page, f"페이지 {self.pages.count() + 1}")
         self.pages.setCurrentIndex(idx)
         return page
+
+    TEMPLATES = {"그래프 + 표": ("그래프", "테이블"), "그래프 두 개": ("그래프", "그래프"),
+                 "숫자 + 미터": ("숫자", "미터"), "그래프 + 표 + 숫자 + 미터": ("그래프", "테이블", "숫자", "미터")}
+
+    def on_start_card(self, card: str, button: QWidget):
+        if card == "sensor":
+            self.apply_template(("그래프", "테이블"))
+            self.scan_devices()
+        elif card == "open":
+            self.open_experiment()
+        elif card == "templates":
+            menu = QMenu(self)
+            for name, kinds in self.TEMPLATES.items():
+                menu.addAction(name, lambda k=kinds: self.apply_template(k))
+            menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def apply_template(self, kinds):
+        page = self.pages.currentWidget()
+        for kind in kinds:
+            page.add_display(kind)
 
     def rename_page(self, index: int):
         if index < 0:
@@ -670,6 +710,7 @@ class MainWindow(QMainWindow):
         self.device_list.setEnabled(False)
         for s in self.sensors:
             s.close()  # old connections are replaced by the new scan
+        self.hw_status.setText("장치 검색 중…")
         self.statusBar().showMessage("장치 검색 중… (블루투스 검색은 5초 정도 걸립니다)")
         thread = threading.Thread(target=lambda: self.scan_done.emit(*discovery.scan_all()),
                                   name="scan", daemon=True)
@@ -696,6 +737,8 @@ class MainWindow(QMainWindow):
         self.device_list.setEnabled(True)
         self.update_measurements()
         msg = f"장치 {len(self.sensors)}개 발견"
+        self.hw_status.setText(msg)
+        self.hw_hint.setVisible(not self.sensors)
         self.statusBar().showMessage(msg + (" — " + " / ".join(warnings) if warnings else ""))
         if warnings:
             self.device_list.setToolTip("\n".join(warnings))
@@ -734,7 +777,16 @@ class MainWindow(QMainWindow):
             for frame in page.displays:
                 frame.refresh(self.dm)
 
+    @property
+    def stop_after(self) -> float | None:
+        return self.conditions.stop_after
+
     def _on_samples(self, sensor_id, t, values):  # called from sensor threads
+        gate = self.gate
+        out = gate.filter(sensor_id, t, values) if gate else (t, values)
+        if out is None:
+            return
+        t, values = out
         for mid, y in values.items():
             self.dm.append(f"{sensor_id}:{mid}", t, y)
 
@@ -745,6 +797,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("기록할 센서가 없습니다. '장치 검색' 후 센서를 선택하세요.")
                 return
             run = self.dm.start_run()
+            self.gate = Gate(self.conditions)
             self._mark_dirty()
             rate = SAMPLE_RATES_HZ[self.rate_combo.currentIndex()]
             self.running_sensors = sensors
@@ -775,20 +828,28 @@ class MainWindow(QMainWindow):
 
     def _tick(self):
         s = self.elapsed.elapsed() / 1000
-        self.elapsed_label.setText(f"{int(s // 60):02d}:{s % 60:05.2f}")
-        if self.stop_after and s >= self.stop_after:
+        gate = self.gate
+        if gate and gate.triggered:  # start condition met: the run's clock starts now
+            gate.triggered = False
+            self.elapsed.restart()
+            s = 0.0
+        waiting = gate is not None and gate.t0 is None
+        self.elapsed_label.setText("대기 중…" if waiting else f"{int(s // 60):02d}:{s % 60:05.2f}")
+        if (self.stop_after and not waiting and s >= self.stop_after) or (gate and gate.stop_hit):
             self.toggle_record()  # auto-stop reached
             return
         self.refresh_displays()
 
     def set_recording_conditions(self):
-        value, ok = QInputDialog.getDouble(
-            self, "기록 조건", "자동 정지 시간 (초, 0 = 직접 정지할 때까지):",
-            self.stop_after or 0.0, 0.0, 86400.0, 1)
-        if ok:
-            self.stop_after = value or None
-            self.statusBar().showMessage(
-                f"기록 조건: {value:g}초 후 자동 정지" if value else "기록 조건: 직접 정지할 때까지 기록")
+        items = [(k, m.label) for k, (_, m) in self.available_measurements().items()]
+        dlg = ConditionsDialog(self, items, self.conditions)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self.conditions = dlg.result_conditions()
+        c = self.conditions
+        parts = ["시작: " + ("측정값 조건" if c.start else "바로"),
+                 "정지: " + ("직접" if not c.stop else f"{c.stop.value:g}초 후" if c.stop.kind == "time" else "측정값 조건")]
+        self.statusBar().showMessage("기록 조건 — " + ", ".join(parts))
 
     def delete_last_run(self):
         if self.recording or not self.dm.runs:

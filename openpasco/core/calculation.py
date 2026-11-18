@@ -105,3 +105,27 @@ def evaluate(expr: str, resolve: Callable[[str], tuple[np.ndarray, np.ndarray] |
     except (TypeError, ValueError, RecursionError) as e:
         raise CalcError(f"계산 오류: {e}") from e
     return base, np.broadcast_to(np.asarray(y, float), base.shape).copy()
+
+
+_NAME = re.compile(r"^\s*([^\W\d]\w*)\s*=(?!=)\s*(.*?)\s*$")
+_BRACKET = re.compile(r"(\[[^\[\]]*\])")
+
+
+def split_assignment(line: str) -> tuple[str, str]:
+    """'name = rhs' -> (name, rhs); raises CalcError when the line is not an assignment."""
+    m = _NAME.match(line)
+    if not m or not m.group(2):
+        raise CalcError("'이름 = 수식' 형태로 입력하세요")
+    name = m.group(1)
+    if name == "t" or name in CONSTS or name in FUNCS:
+        raise CalcError(f"'{name}'은(는) 예약된 이름이라 쓸 수 없습니다")
+    return name, m.group(2)
+
+
+def substitute(expr: str, constants: dict[str, float]) -> str:
+    """Replace bare constant names by their values; text inside [ ] (measurement names) is untouched."""
+    if not constants:
+        return expr
+    pat = re.compile(r"(?<![\w.])(" + "|".join(map(re.escape, sorted(constants, key=len, reverse=True))) + r")(?![\w(])")
+    return "".join(part if part.startswith("[") else pat.sub(lambda m: f"({constants[m.group(1)]!r})", part)
+                   for part in _BRACKET.split(expr))
