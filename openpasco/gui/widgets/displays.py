@@ -45,6 +45,8 @@ class DisplayFrame(QFrame):
         self.selector.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.selector.currentIndexChanged.connect(lambda _: self.body.show(self.measurement, None))
         header.addWidget(self.selector)
+        for w in getattr(body, "tool_widgets", lambda: [])():  # display-specific tools share the one strip
+            header.addWidget(w)
         header.addStretch()
         close = QToolButton(text="✕", autoRaise=True, toolTip="디스플레이 닫기")
         close.clicked.connect(lambda: self.closed.emit(self))
@@ -147,17 +149,9 @@ class GraphDisplay(QWidget):
         self.analysis = QComboBox()
         self.analysis.addItems(self.ANALYSES)
         self.result = QLabel("", wordWrap=True, textInteractionFlags=Qt.TextSelectableByMouse)
-        bar_box = QWidget(objectName="display_bar")  # same light strip as the frame header
-        bar = QHBoxLayout(bar_box)
-        bar.setContentsMargins(6, 0, 6, 2)
-        bar.addWidget(self.older_check)
-        bar.addWidget(self.range_check)
-        bar.addWidget(self.analysis)
-        bar.addStretch()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(bar_box)
         layout.addWidget(self.plot, 1)
         layout.addWidget(self.result)
 
@@ -168,6 +162,9 @@ class GraphDisplay(QWidget):
         self.older_check.toggled.connect(lambda _: self.older_toggled.emit())
         self.region.sigRegionChanged.connect(self._schedule)
         self.analysis.currentIndexChanged.connect(lambda _: self._analyze())
+
+    def tool_widgets(self):  # placed by DisplayFrame in its toolbar strip
+        return [self.older_check, self.range_check, self.analysis]
 
     @property
     def wants_older(self) -> bool:
