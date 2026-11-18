@@ -10,7 +10,7 @@ from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDockWidget, QFileDialog, QHBoxLayout,
     QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
-    QPushButton, QSplitter, QStyle, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton,
+    QFrame, QPushButton, QSplitter, QStyle, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -81,6 +81,7 @@ class Page(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("page")
+        self.setAttribute(Qt.WA_StyledBackground)  # plain QWidget subclasses ignore QSS backgrounds otherwise
         self.setAcceptDrops(True)
         self.box = QVBoxLayout(self)
         self.displays: list[DisplayFrame] = []
@@ -197,22 +198,25 @@ class MainWindow(QMainWindow):
         self.act_delete_run = act("마지막 런 삭제", self.delete_last_run)
         self.act_calc_delete = act("계산 삭제…", self.remove_calculation)
 
-        mb = self.menuBar()
+        mb = self.menuBar()  # menu names follow Capstone's: File / Edit / Workbook / Display / Help
         file_menu = mb.addMenu("파일(&F)")
         for a in (self.act_new, self.act_open, self.act_save, self.act_save_as, None, self.act_export, self.act_import_cap, None, self.act_quit):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
-        page_menu = mb.addMenu("페이지(&P)")
-        page_menu.addActions([self.act_add_page, self.act_rename_page])
-        mb.addMenu("측정(&M)").addActions([self.act_record, self.act_conditions, self.act_delete_run,
+        mb.addMenu("편집(&E)").addActions([self.act_record, self.act_conditions, self.act_delete_run,
                                           self.act_calc, self.act_calc_delete])
-        self.view_menu = mb.addMenu("보기(&V)")
+        mb.addMenu("워크북(&W)").addActions([self.act_add_page, self.act_rename_page])
+        self.view_menu = mb.addMenu("디스플레이(&D)")
+        for kind in DISPLAY_TYPES:
+            self.view_menu.addAction(act(f"{kind} 추가", lambda _=False, k=kind: self.add_display(k)))
+        self.view_menu.addSeparator()
         self.act_dark = QAction("다크 모드", self, checkable=True, toggled=self.set_dark)
         self.view_menu.addAction(self.act_dark)
         self.view_menu.addSeparator()
         mb.addMenu("도움말(&H)").addAction(act("정보", self.about))
 
         tb = QToolBar("기본", movable=False, objectName="main_toolbar")
-        tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        tb.setToolButtonStyle(Qt.ToolButtonIconOnly)  # icons only, like Capstone; text shows as tooltip
+        tb.setIconSize(QSize(26, 26))
         tb.addActions([self.act_new, self.act_open, self.act_save])
         tb.addSeparator()
         tb.addAction(self.act_add_page)
@@ -234,7 +238,6 @@ class MainWindow(QMainWindow):
             return b
 
         self.hw_btn = tool("하드웨어\n설정", "hardware", lambda on: self.hw_panel.setVisible(on), True)
-        self.hw_btn.setChecked(True)
         tool("데이터\n요약", "summary", self.show_data_summary)
         tool("계산기", "calculator", self.add_calculation)
         pl.addStretch()
@@ -252,6 +255,7 @@ class MainWindow(QMainWindow):
         self.scan_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         hl.addWidget(self.scan_btn)
         self.hw_panel.setFixedWidth(210)
+        self.hw_panel.setVisible(False)
 
         left = QWidget(objectName="palette")
         row = QHBoxLayout(left)
@@ -289,17 +293,26 @@ class MainWindow(QMainWindow):
             b.clicked.connect(slot)
             return b
 
+        def group():  # rounded darker panel around related controls
+            g = QFrame(objectName="ctl_group")
+            gl = QHBoxLayout(g)
+            gl.setContentsMargins(8, 2, 8, 2)
+            gl.setSpacing(8)
+            row.addWidget(g)
+            return gl
+
+        g1 = group()
         self.record_btn = button("record_btn", "기록", "record", self.toggle_record, "기록 시작/정지 (Ctrl+R)")
-        row.addWidget(self.record_btn)
-
+        g1.addWidget(self.record_btn)
         self.timer_label = self.elapsed_label = QLabel("00:00.00", objectName="timer")
-        row.addWidget(self.timer_label)
+        g1.addWidget(self.timer_label)
 
-        row.addWidget(QLabel("샘플링 속도"))
+        g2 = group()
+        g2.addWidget(QLabel("샘플링 속도"))
         self.rate_combo = QComboBox()
         self.rate_combo.addItems([f"{r} Hz" for r in SAMPLE_RATES_HZ])
         self.rate_combo.setCurrentText("10 Hz")
-        row.addWidget(self.rate_combo)
+        g2.addWidget(self.rate_combo)
 
         self.conditions_btn = button("action_btn", "기록 조건", "clock", self.set_recording_conditions,
                                      "자동 정지 시간 설정")
@@ -475,20 +488,23 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "가져오기", "읽을 수 있는 측정 데이터가 없습니다."
                                     + (f"\n(지원하지 않는 형식의 데이터 {res.skipped}개 건너뜀)" if res.skipped else ""))
             return
-        keys = [k for r in res.runs[:1] for k in r.series][:2] or list(res.measurements)[:2]
-        displays = [{"kind": "그래프", "key": keys[0]}, {"kind": "테이블", "key": keys[0]}]
-        if len(keys) > 1:
-            displays.append({"kind": "그래프", "key": keys[1]})
+        keys = [k for r in res.runs[:1] for k in r.series] or list(res.measurements)
+        pages = []
+        for pname, items in res.pages:  # unresolved links fall back to cycling through measurements
+            if items:
+                pages.append({"name": pname, "displays": [{"kind": k, "key": key or keys[i % len(keys)]}
+                                                          for i, (k, key) in enumerate(items)]})
+        pages = pages or [{"name": Path(name).stem, "displays": [{"kind": "그래프", "key": keys[0]}, {"kind": "테이블", "key": keys[0]}]}]
         self.dm.load(res.runs)
         self.known = res.measurements
-        self.apply_layout({"pages": [{"name": Path(name).stem, "displays": displays}]})
+        self.apply_layout({"pages": pages})
         self.path = None  # an import is a new, unsaved experiment
         self.doc_name = f"{Path(name).name} (가져옴)"
         self._set_clean()
         notes = (f", 지원하지 않는 데이터 {res.skipped}개 건너뜀" if res.skipped else "") + \
                 (f", 경고 {len(res.warnings)}건" if res.warnings else "")
         self.statusBar().showMessage(
-            f"가져옴: 런 {len(res.runs)}개, 측정값 {len(res.measurements)}종{notes} (단위 정보는 가져오지 않음)")
+            f"가져옴: 런 {len(res.runs)}개, 측정값 {len(res.measurements)}종{notes} (페이지 구성과 디스플레이별 측정값 포함)")
 
     # --- calculations -----------------------------------------------------
     def create_calc(self, name: str, unit: str, expr: str) -> Calc:

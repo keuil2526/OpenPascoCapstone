@@ -5,10 +5,12 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
 
 SIZE = 40
+SCALE = 2
 
 
 def _icon(draw) -> QIcon:
-    pm = QPixmap(SIZE, SIZE)
+    pm = QPixmap(SIZE * SCALE, SIZE * SCALE)  # drawn at 2x so 125%/150% screens stay sharp
+    pm.setDevicePixelRatio(SCALE)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
@@ -120,7 +122,23 @@ def stop(p):
     p.drawRoundedRect(QRectF(10, 10, 20, 20), 3, 3)
 
 
-_DRAW = {f.__name__: f for f in (graph, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash)}
+def overlay(p):  # stacked runs (dark strokes: used on the light graph toolbar)
+    for i, c in enumerate(("#9fb4e8", "#e8a09f", "#1f2bff")):
+        p.setPen(_pen(c, 3))
+        y = 10 + 7 * i
+        p.drawPolyline(QPolygonF([QPointF(5, y + 10), QPointF(14, y), QPointF(24, y + 8), QPointF(35, y - 2)]))
+
+
+def span(p):  # selected x range
+    p.fillRect(QRectF(12, 6, 16, 28), QColor(42, 130, 218, 90))
+    p.setPen(_pen("#2a82da", 3))
+    p.drawLine(12, 5, 12, 35)
+    p.drawLine(28, 5, 28, 35)
+    p.setPen(_pen("#555555", 2))
+    p.drawLine(4, 35, 36, 35)
+
+
+_DRAW = {f.__name__: f for f in (graph, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span)}
 
 
 def icon(name: str) -> QIcon:

@@ -7,7 +7,7 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QTableView, QToolButton,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from openpasco.analysis.numeric import MODELS, derivative, fit, integral, select, statistics
+from openpasco.gui import icons
 from openpasco.hardware.base import Measurement
 
 
@@ -26,7 +27,7 @@ class DisplayFrame(QFrame):
     def __init__(self, title: str, body: QWidget):
         super().__init__()
         self.setObjectName("display_frame")
-        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShape(QFrame.NoFrame)
         self.body = body
         self.kind = title
         self._older_sig = None
@@ -35,12 +36,13 @@ class DisplayFrame(QFrame):
             body.older_toggled.connect(self._older_toggled)
         self.measurements: dict[str, Measurement] = {}
 
-        header = QHBoxLayout()
+        bar = QWidget(objectName="display_bar")
+        header = QHBoxLayout(bar)
         header.setContentsMargins(6, 2, 2, 2)
-        header.addWidget(QLabel(f"<b>{title}</b>"))
+        header.addWidget(QLabel(title))
         self.selector = QComboBox(toolTip="표시할 측정값")
         self.selector.setPlaceholderText("측정값 선택")
-        self.selector.setMinimumContentsLength(12)
+        self.selector.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.selector.currentIndexChanged.connect(lambda _: self.body.show(self.measurement, None))
         header.addWidget(self.selector)
         header.addStretch()
@@ -49,8 +51,9 @@ class DisplayFrame(QFrame):
         header.addWidget(close)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.addLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(bar)
         layout.addWidget(body, 1)
 
     @property
@@ -122,7 +125,9 @@ class GraphDisplay(QWidget):
         self.plot.setLabel("left", "측정값 선택")
         self.plot.setDownsampling(auto=True, mode="peak")  # long runs stay fast
         self.plot.setClipToView(True)
-        self.curve = self.plot.plot(pen=pg.mkPen("#2a82da", width=2))
+        for angle in (0, 90):  # Capstone draws the x=0 / y=0 axes as dark lines
+            self.plot.addItem(pg.InfiniteLine(angle=angle, pos=0, pen=pg.mkPen("#808080", width=1)), ignoreBounds=True)
+        self.curve = self.plot.plot(pen=pg.mkPen("#1f2bff", width=2))
         self.overlay = self.plot.plot(pen=pg.mkPen("#c62828", width=2, style=Qt.DashLine))
         self.region = pg.LinearRegionItem(movable=True)
         self.region.setVisible(False)
@@ -131,19 +136,28 @@ class GraphDisplay(QWidget):
         self.legend = self.plot.addLegend(offset=(-10, 10))
         self.older: list[pg.PlotDataItem] = []
         self.older_names: list[str] = []
-        self.older_check = QCheckBox("이전 런 겹쳐보기")
-        self.range_check = QCheckBox("구간 선택")
+        def toggle(icon_name, tip):  # icon toggle like Capstone's graph toolbar
+            b = QToolButton(icon=icons.icon(icon_name), toolTip=tip, checkable=True, autoRaise=True)
+            b.setIconSize(QSize(22, 22))
+            b.setObjectName("graph_tool")
+            return b
+
+        self.older_check = toggle("overlay", "이전 런 겹쳐보기")
+        self.range_check = toggle("span", "구간 선택")
         self.analysis = QComboBox()
         self.analysis.addItems(self.ANALYSES)
         self.result = QLabel("", wordWrap=True, textInteractionFlags=Qt.TextSelectableByMouse)
-        bar = QHBoxLayout()
+        bar_box = QWidget(objectName="display_bar")  # same light strip as the frame header
+        bar = QHBoxLayout(bar_box)
+        bar.setContentsMargins(6, 0, 6, 2)
         bar.addWidget(self.older_check)
         bar.addWidget(self.range_check)
         bar.addWidget(self.analysis)
         bar.addStretch()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(bar)
+        layout.setSpacing(0)
+        layout.addWidget(bar_box)
         layout.addWidget(self.plot, 1)
         layout.addWidget(self.result)
 

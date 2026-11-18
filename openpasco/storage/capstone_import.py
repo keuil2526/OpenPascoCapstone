@@ -4,8 +4,15 @@ Layout was derived from sample files, not from documentation (see docs/capstone_
   - each <DataSource LongName=...> holds one <DataSet> per run (DataGroupNumber = run number)
   - interval data sets (StorageType 0 / independent StorageType 1): time = start + interval * i,
     values = the first CacheDataCount 12-byte records (uint32 valid-flag, float64) of the data file
-  - other storage types (user-entered tables, StorageType 7/4) are skipped and counted
-Units are stored by Capstone as numeric codes with no table we can verify, so unit is left empty.
+  - user-entered tables (dependent StorageType 7 / independent 4): DataCacheDataSize records of
+    (uint32 type=2, uint32 byte length, UTF-16LE text); x = row number 1..N. Trailing bytes are ignored.
+  - pages: <WorkbookPage Name> > <WorkbookItem> with a CSLineGraph / CSDataTable / CSDataDigits /
+    CSBarMeter child and relative Position X/Y; we keep only display kinds in reading order.
+    A display's measurement = first <BundleInput BundleMeasID> that equals a DataSource EUID
+    (467/467 non-null links matched in samples; the time axis points at the master time measurement).
+  - other storage types are skipped and counted
+Units are numeric codes. Only codes whose sample values match the unit (checked against real
+files, e.g. Force ~ -10..0, Position 0..0.7, gravity ~9.8) are translated; others stay empty.
 """
 import struct
 import zipfile
@@ -22,6 +29,8 @@ from openpasco.hardware.base import Measurement
 MAX_XML_BYTES = 200 * 1024 * 1024
 MAX_DATA_BYTES = 512 * 1024 * 1024
 RECORD = struct.Struct("<Id")  # uint32 valid flag, float64 value
+# shortcut: only codes confirmed from sample values; extend when more are verified
+UNITS = {"256": "s", "1024": "V", "1280": "m", "1536": "N", "2048": "m/s²", "2304": "m/s", "3584": "A"}
 
 
 @dataclass
@@ -30,6 +39,28 @@ class ImportResult:
     measurements: dict[str, tuple[str, Measurement]]
     skipped: int = 0  # data sets in formats we do not read
     warnings: list[str] = field(default_factory=list)
+    pages: list[tuple[str, list[tuple[str, str | None]]]] = field(default_factory=list)  # (page name, display kinds)
+
+
+DISPLAY_TAGS = {"CSLineGraph": "그래프", "CSDataTable": "테이블", "CSDataDigits": "숫자", "CSBarMeter": "미터"}
+
+
+def _pages(root, keys: dict[str, str]) -> list:
+    out = []
+    for i, page in enumerate(root.iter("WorkbookPage"), 1):
+        items = []
+        for it in page.findall("WorkbookItem"):
+            kind = next((DISPLAY_TAGS[c.tag] for c in it if c.tag in DISPLAY_TAGS), None)
+            pos = it.find("Position")
+            try:
+                xy = (round(float(pos.get("Y")), 1), float(pos.get("X")))  # rows of similar height first
+            except (AttributeError, TypeError, ValueError):
+                xy = (0.0, 0.0)
+            key = next((keys[b.get("BundleMeasID")] for b in it.iter("BundleInput") if b.get("BundleMeasID") in keys), None)
+            if kind:
+                items.append((xy, kind, key))
+        out.append((page.get("Name") or f"페이지 {i}", [(k, key) for _, k, key in sorted(items, key=lambda t: t[0])]))
+    return out
 
 
 def _read_member(z: zipfile.ZipFile, name: str, limit: int) -> bytes:
@@ -49,6 +80,22 @@ def _values(raw: bytes, n: int) -> np.ndarray:
     return out
 
 
+def _table_values(raw: bytes, n: int) -> np.ndarray:
+    out, o = np.full(n, np.nan), 0
+    for i in range(n):
+        if o + 8 > len(raw):
+            raise ValueError("표 데이터가 선언된 개수보다 짧습니다")
+        kind, size = struct.unpack_from("<II", raw, o)
+        if kind != 2 or o + 8 + size > len(raw):
+            raise ValueError("알 수 없는 표 형식")
+        try:
+            out[i] = float(raw[o + 8:o + 8 + size].decode("utf-16le").replace(",", "."))
+        except ValueError:
+            pass  # non-numeric cell stays NaN
+        o += 8 + size
+    return out
+
+
 def load_cap(path) -> ImportResult:
     path = Path(path)
     try:
@@ -62,6 +109,7 @@ def load_cap(path) -> ImportResult:
     started = datetime.fromtimestamp(path.stat().st_mtime)  # file stores no verified start time
     runs: dict[int, Run] = {}
     meas: dict[str, tuple[str, Measurement]] = {}
+    euid_key: dict[str, str] = {}
     result = ImportResult([], meas)
     with z:
         for src in root.iter("DataSource"):
@@ -73,20 +121,29 @@ def load_cap(path) -> ImportResult:
                 k += 1
                 key = f"cap:{name}#{k}"
             lo, hi = np.inf, -np.inf
+            if src.get("EUID"):
+                euid_key[src.get("EUID")] = key
+            # code is trusted only when the display unit equals the base unit
+            unit = UNITS.get(src.get("BaseUnit"), "") if src.get("BaseUnit") == src.get("DefaultUnit") else ""
             for ds in src.findall("DataSet"):
                 seg = ds.find("DataSegmentElement")
                 dep = seg.find("DependentStorageElement") if seg is not None else None
                 ind = seg.find("IndependentStorageElement") if seg is not None else None
-                if dep is None or ind is None or dep.get("StorageType") != "0" or ind.get("StorageType") != "1":
+                kinds = (dep.get("StorageType"), ind.get("StorageType")) if dep is not None and ind is not None else None
+                if kinds not in (("0", "1"), ("7", "4")):
                     result.skipped += 1
                     continue
                 try:
                     n = int(ind.get("CacheDataCount"))
-                    dt, t0 = float(ind.get("IntervalCacheInterval")), float(ind.get("IntervalCacheStartValue"))
                     run_no = int(ds.get("DataGroupNumber"))
                     if n < 0 or n * RECORD.size > MAX_DATA_BYTES:
                         raise ValueError("잘못된 데이터 개수")
-                    y = _values(_read_member(z, dep.get("FileName").replace("\\", "/"), MAX_DATA_BYTES), n)
+                    raw = _read_member(z, dep.get("FileName").replace("\\", "/"), MAX_DATA_BYTES) if n else b""
+                    if kinds == ("0", "1"):
+                        dt, t0 = float(ind.get("IntervalCacheInterval")), float(ind.get("IntervalCacheStartValue"))
+                        y, x = _values(raw, n), t0 + dt * np.arange(n)
+                    else:
+                        y, x = _table_values(raw, n), np.arange(1.0, n + 1)
                 except (KeyError, TypeError, ValueError) as e:
                     result.warnings.append(f"{name}: 건너뜀 ({e})")
                     continue
@@ -94,12 +151,13 @@ def load_cap(path) -> ImportResult:
                     continue
                 run = runs.setdefault(run_no, Run(run_no, started))
                 run.series[key] = Series(n)
-                run.series[key].extend(t0 + dt * np.arange(n), y)
+                run.series[key].extend(x, y)
                 if np.isfinite(y).any():
                     lo, hi = min(lo, np.nanmin(y)), max(hi, np.nanmax(y))
             if key in {k2 for r in runs.values() for k2 in r.series}:
                 if lo == hi:
                     lo, hi = lo - 1, hi + 1
-                meas[key] = ("Capstone 파일", Measurement(key, name, "", float(lo), float(hi)))
+                meas[key] = ("Capstone 파일", Measurement(key, name, unit, float(lo), float(hi)))
     result.runs = [runs[n] for n in sorted(runs)]
+    result.pages = _pages(root, euid_key)
     return result
