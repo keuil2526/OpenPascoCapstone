@@ -114,7 +114,7 @@ def test_meter_angle_clamps():
 
 def test_dark_mode_restyles_plots(win):
     page = win.pages.currentWidget()
-    plot = page.add_display("그래프").body
+    plot = page.add_display("그래프").body.plot
     win.act_dark.setChecked(True)
     dark_bg = plot.backgroundBrush().color().lightness()
     win.act_dark.setChecked(False)
@@ -224,3 +224,43 @@ def test_export_csv(win, tmp_path, monkeypatch):
     win.export_csv()
     rows = list(csv.reader(open(p, encoding="utf-8-sig")))
     assert "위치 (m)" in rows[0] and len(rows) > 10
+
+
+def _graph_with_data(win, t, y):
+    from hardware.base import Measurement
+    g = win.pages.currentWidget().add_display("그래프").body
+    g.show(Measurement("x", "위치", "m", 0, 1), (t, y))
+    return g
+
+
+def _pick(g, name):
+    g.analysis.setCurrentIndex(g.analysis.findText(name))  # triggers _analyze synchronously
+
+
+def test_graph_stats_fit_and_range(win):
+    import numpy as np
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, 2 * t + 1)
+    _pick(g, "통계")
+    assert "n=101" in g.result.text() and "최대=21" in g.result.text()
+    g.range_check.setChecked(True)
+    g.region.setRegion((2, 4))
+    g._analyze()
+    assert "n=21" in g.result.text()
+    _pick(g, "선형")
+    assert "m=2" in g.result.text() and g.overlay.getData()[0] is not None
+    assert g.overlay.getData()[0].min() >= 2 - 1e-9 and g.overlay.getData()[0].max() <= 4 + 1e-9
+
+
+def test_graph_derivative_and_errors(win):
+    import numpy as np
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, t**2)
+    _pick(g, "미분")
+    assert abs(g.curve.getData()[1][50] - 10) < 0.2
+    g.range_check.setChecked(True)
+    g.region.setRegion((100, 200))  # outside data
+    _pick(g, "통계")
+    assert "데이터가 없습니다" in g.result.text()
+    g.show(None, None)  # data cleared: no crash, empty result
+    assert g.result.text() == ""

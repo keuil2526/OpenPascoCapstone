@@ -7,13 +7,14 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QTableView, QToolButton,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QTableView, QToolButton,
     QVBoxLayout, QWidget,
 )
 
+from analysis.numeric import MODELS, derivative, fit, integral, select, statistics
 from hardware.base import Measurement
 
 
@@ -84,24 +85,115 @@ def style_plot(plot: pg.PlotWidget):
         axis.setTextPen(fg)
 
 
-class GraphDisplay(pg.PlotWidget):
+class GraphDisplay(QWidget):
+    """Plot with optional range selection and analysis (stats, fits, derivative, integral)."""
+
+    ANALYSES = ["분석 없음", "통계", *MODELS, "미분", "적분"]
+    DEBOUNCE_MS = 400  # analysis runs at most this often while data streams in
+
     def __init__(self):
         super().__init__()
-        style_plot(self)
-        self.showGrid(x=True, y=True, alpha=0.3)
-        self.setLabel("bottom", "시간", units="s")
-        self.setLabel("left", "측정값 선택")
-        self.setDownsampling(auto=True, mode="peak")  # long runs stay fast
-        self.setClipToView(True)
-        self.curve = self.plot(pen=pg.mkPen("#2a82da", width=2))
+        self.plot = pg.PlotWidget()
+        style_plot(self.plot)
+        self.plot.showGrid(x=True, y=True, alpha=0.3)
+        self.plot.setLabel("bottom", "시간", units="s")
+        self.plot.setLabel("left", "측정값 선택")
+        self.plot.setDownsampling(auto=True, mode="peak")  # long runs stay fast
+        self.plot.setClipToView(True)
+        self.curve = self.plot.plot(pen=pg.mkPen("#2a82da", width=2))
+        self.overlay = self.plot.plot(pen=pg.mkPen("#c62828", width=2, style=Qt.DashLine))
+        self.region = pg.LinearRegionItem(movable=True)
+        self.region.setVisible(False)
+        self.plot.addItem(self.region)
+
+        self.range_check = QCheckBox("구간 선택")
+        self.analysis = QComboBox()
+        self.analysis.addItems(self.ANALYSES)
+        self.result = QLabel("", wordWrap=True, textInteractionFlags=Qt.TextSelectableByMouse)
+        bar = QHBoxLayout()
+        bar.addWidget(self.range_check)
+        bar.addWidget(self.analysis)
+        bar.addStretch()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(bar)
+        layout.addWidget(self.plot, 1)
+        layout.addWidget(self.result)
+
+        self.meas: Measurement | None = None
+        self.data = None
+        self.timer = QTimer(self, singleShot=True, interval=self.DEBOUNCE_MS, timeout=self._analyze)
+        self.range_check.toggled.connect(self._range_toggled)
+        self.region.sigRegionChanged.connect(self._schedule)
+        self.analysis.currentIndexChanged.connect(lambda _: self._analyze())
+
+    def _range_toggled(self, on):
+        self.region.setVisible(on)
+        if on and self.data is not None and len(self.data[0]) > 1:
+            t = self.data[0]
+            self.region.setRegion((t[0] + 0.2 * (t[-1] - t[0]), t[0] + 0.8 * (t[-1] - t[0])))
+        self._analyze()
+
+    def _schedule(self):
+        if not self.timer.isActive():
+            self.timer.start()
 
     def show(self, meas, data):
-        if meas:
-            self.setLabel("left", meas.name, units=meas.unit)
-        if data is None:
+        self.meas, self.data = meas, data
+        if data is None or len(data[0]) == 0:
             self.curve.setData([], [])
+            self.overlay.setData([], [])
+            self.result.setText("")
+            self._set_ylabel(None)
+        elif self.analysis.currentText() in ("미분", "적분"):
+            self._schedule()  # derived curve replaces the raw one in _analyze
         else:
             self.curve.setData(*data)
+            self._set_ylabel(None)
+            if self.analysis.currentIndex() > 0:
+                self._schedule()
+
+    def _set_ylabel(self, derived):
+        if self.meas is None:
+            return
+        name, unit = self.meas.name, self.meas.unit
+        if derived == "미분":
+            name, unit = f"d{name}/dt", f"{unit}/s"
+        elif derived == "적분":
+            name, unit = f"∫{name}dt", f"{unit}·s"
+        self.plot.setLabel("left", name, units=unit)
+
+    def _analyze(self):
+        self.timer.stop()
+        mode = self.analysis.currentText()
+        self.overlay.setData([], [])
+        if self.data is None or len(self.data[0]) == 0:
+            return
+        t, y = self.data
+        try:
+            if mode in ("미분", "적분"):
+                d = derivative(t, y) if mode == "미분" else integral(t, y)
+                self.curve.setData(t, d)
+                self._set_ylabel(mode)
+                self.result.setText(f"{mode} 곡선 표시 중 (구간 선택은 무시됨)")
+                return
+            self.curve.setData(t, y)
+            self._set_ylabel(None)
+            if self.range_check.isChecked():
+                t, y = select(t, y, *self.region.getRegion())
+            if mode == "분석 없음":
+                self.result.setText("")
+            elif mode == "통계":
+                s = statistics(t, y)
+                self.result.setText(
+                    f"n={s.n}  평균={s.mean:.4g}  표준편차={s.std:.4g}  "
+                    f"최소={s.minimum:.4g} (t={s.t_min:.3g})  최대={s.maximum:.4g} (t={s.t_max:.3g})")
+            else:
+                f = fit(mode, t, y)
+                self.overlay.setData(t, f.predict(t))
+                self.result.setText(f.summary())
+        except ValueError as e:  # too few points, no convergence, empty selection
+            self.result.setText(str(e))
 
 
 class ArrayModel(QAbstractTableModel):
