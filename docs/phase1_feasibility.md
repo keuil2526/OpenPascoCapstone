@@ -47,7 +47,9 @@
 ### 2.3 Capstone 파일(.cap) 형식
 
 - 공식 명세 없음. 제3자 사이트는 "독점 형식"이라고만 기술(미검증).
-- 실제 `.cap` 파일을 확보해 `file`, ZIP 여부, 헤더 덤프부터 확인해야 한다. 추측 구현 금지 원칙에 따라 샘플 확보 전까지 보류.
+- **실측 (2026-11-18)**: 로컬 `.cap` 파일은 **ZIP 컨테이너**다. 내부에 `main.xml`(실험 구성, 약 200 KB)과 `data/Z_<hex>_<n>.tmp` 바이너리 블록 여러 개가 들어 있다. 사용자 실험 파일 수 개와, Wine에 설치된 Capstone의 QuickStart 템플릿 34개(`~/.wine/drive_c/Program Files/PASCO scientific/Capstone/Resources/Templates/`)를 샘플로 쓸 수 있다.
+- 다음 단계(Phase 6): `main.xml` 스키마와 `.tmp` 바이너리 인코딩(숫자 형식, 런·측정 매핑) 분석. 사용자 실험 파일은 개인 데이터이므로 저장소에 넣지 않는다.
+- Wine에 Capstone이 설치되어 있으므로, Wine에서 장비 통신이 되는지 확인하면 USB 트래픽 캡처(`usbmon`)에도 활용할 수 있다 (미확인).
 
 ## 3. 종합 평가
 

@@ -43,17 +43,27 @@ def test_pages_last_page_cannot_close(win):
     assert win.pages.count() == 1
 
 
+def test_record_needs_sensor(win):
+    win.toggle_record()
+    assert not win.recording and not win.dm.runs
+
+
 def test_record_toggle_locks_rate(win):
+    win.scan_devices()
     win.toggle_record()
     assert win.recording and not win.rate_combo.isEnabled()
     win.toggle_record()
     assert not win.recording and win.rate_combo.isEnabled()
 
 
-def test_new_experiment_resets(win):
+def test_new_experiment_resets(win, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    win.scan_devices()
     win.add_page()
     win.toggle_record()
     win.new_experiment()
+    assert not win.dm.runs
     assert win.pages.count() == 1 and not win.recording
 
 
@@ -68,7 +78,7 @@ def test_drop_adds_display_and_rejects_unknown(win):
     page = win.pages.currentWidget()
     _drop(page, "그래프".encode())
     _drop(page, b"bogus")
-    assert [f.body.__class__.__name__ for f in page.displays] == ["PlotWidget"]
+    assert [f.body.__class__.__name__ for f in page.displays] == ["GraphDisplay"]
 
 
 def test_palette_mime_carries_kind(win):
@@ -119,3 +129,40 @@ def test_meter_paints_without_error(win, capfd, value):
     m.set_value(value)
     m.grab()  # runs paintEvent; PySide prints (not raises) errors from Python overrides
     assert "Error calling Python override" not in capfd.readouterr().err
+
+
+def test_new_experiment_cancel_keeps_data(win, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+    win.scan_devices()
+    win.toggle_record()
+    win.toggle_record()
+    win.new_experiment()
+    assert len(win.dm.runs) == 1
+
+
+def test_recording_end_to_end(win):
+    import time
+    win.scan_devices()
+    win.rate_combo.setCurrentText("100 Hz")
+    page = win.pages.currentWidget()
+    graph, digits = page.add_display("그래프"), page.add_display("숫자")
+    assert graph.key == "sim-motion:position"  # first measurement auto-selected
+    win.toggle_record()
+    time.sleep(0.3)
+    win.toggle_record()
+    t, y = win.dm.latest(graph.key)
+    assert 15 < len(t) < 60 and abs(t[1] - t[0] - 0.01) < 1e-12
+    assert len(graph.body.curve.getData()[0]) == len(t)
+    assert digits.body.value.text() != "— — —"
+
+
+def test_unchecked_sensor_not_recorded(win):
+    from PySide6.QtCore import Qt
+    win.scan_devices()
+    win.device_list.item(1).setCheckState(Qt.Unchecked)  # temperature sensor off
+    frame = win.pages.currentWidget().add_display("테이블")
+    assert all(not k.startswith("sim-temp") for k in frame.measurements)
+    win.toggle_record()
+    win.toggle_record()
+    assert all(not k.startswith("sim-temp") for k in win.dm.runs[-1].series)

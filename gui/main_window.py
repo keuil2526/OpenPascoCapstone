@@ -1,14 +1,17 @@
 """OpenPASCO main window: pages of displays, side tool panel, recording control bar."""
-from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, Qt, QTimer, Signal
 import pyqtgraph as pg
 from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDockWidget, QHBoxLayout, QInputDialog,
-    QLabel, QListWidget, QMainWindow, QMessageBox, QPushButton, QSplitter, QStyle,
+    QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter, QStyle,
     QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
+from core.data_manager import DataManager
 from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
+from hardware import simulated
+from hardware.base import Sensor
 
 SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 GRID_COLUMNS = 2
@@ -60,6 +63,8 @@ class DisplayPalette(QListWidget):
 class Page(QWidget):
     """One experiment page: displays in rows of 2, resizable with splitters."""
 
+    display_added = Signal(DisplayFrame)
+
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
@@ -88,6 +93,7 @@ class Page(QWidget):
         frame.closed.connect(self.remove_display)
         self.displays.append(frame)
         self._relayout()
+        self.display_added.emit(frame)
         return frame
 
     def remove_display(self, frame):
@@ -100,9 +106,11 @@ class Page(QWidget):
         root = QSplitter(Qt.Vertical, childrenCollapsible=False)
         for r in range(0, len(self.displays), GRID_COLUMNS):
             row = QSplitter(Qt.Horizontal, childrenCollapsible=False)
-            for frame in self.displays[r:r + GRID_COLUMNS]:
+            for i, frame in enumerate(self.displays[r:r + GRID_COLUMNS]):
                 row.addWidget(frame)
+                row.setStretchFactor(i, 1)  # equal widths regardless of size hints
             root.addWidget(row)
+            root.setStretchFactor(root.count() - 1, 1)
         self.box.replaceWidget(self.splitter, root)
         self.splitter.deleteLater()
         self.splitter = root
@@ -116,10 +124,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("OpenPASCO")
         self.resize(1280, 800)
         self.recording = False
+        self.dm = DataManager()
+        self.sensors: list[Sensor] = []
 
         self.pages = QTabWidget(tabsClosable=True, movable=True, documentMode=True)
         self.pages.tabCloseRequested.connect(self.close_page)
         self.pages.tabBarDoubleClicked.connect(self.rename_page)
+        self.pages.currentChanged.connect(lambda _: self.refresh_displays())
         plus = QToolButton(text="+", autoRaise=True, toolTip="페이지 추가 (Ctrl+T)")
         plus.clicked.connect(self.add_page)
         self.pages.setCornerWidget(plus, Qt.TopRightCorner)
@@ -179,10 +190,11 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("<b>하드웨어 설정</b>"))
         self.device_list = QListWidget()
-        self.device_list.addItem("연결된 장치 없음")
+        self.device_list.addItem("연결된 장치 없음 — '장치 검색'을 누르세요")
         self.device_list.setEnabled(False)
+        self.device_list.itemChanged.connect(lambda _: self.update_measurements())
         layout.addWidget(self.device_list, 1)
-        scan = QPushButton("장치 검색", clicked=self.not_ready)
+        scan = QPushButton("장치 검색", clicked=self.scan_devices)
         scan.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         layout.addWidget(scan)
 
@@ -230,7 +242,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.BottomToolBarArea, bar)
 
         self.elapsed = QElapsedTimer()
-        self.clock = QTimer(self, interval=100, timeout=self._tick)
+        self.clock = QTimer(self, interval=33, timeout=self._tick)  # ~30 fps display refresh
 
     # --- window state -----------------------------------------------------
     def _restore_layout(self):
@@ -249,6 +261,8 @@ class MainWindow(QMainWindow):
         QSettings().setValue("dark", on)
 
     def closeEvent(self, event):
+        if self.recording:
+            self.toggle_record()  # stop sensor threads
         s = QSettings()
         s.setValue("geometry", self.saveGeometry())
         s.setValue("windowState", self.saveState())
@@ -256,14 +270,19 @@ class MainWindow(QMainWindow):
 
     # --- actions ----------------------------------------------------------
     def new_experiment(self):
+        if self.dm.runs and QMessageBox.question(
+                self, "새 실험", "기록된 데이터가 모두 사라집니다. 계속할까요?") != QMessageBox.Yes:
+            return
         if self.recording:
             self.toggle_record()
+        self.dm.clear()
         self.pages.clear()
         self.add_page()
         self.statusBar().showMessage("새 실험")
 
     def add_page(self) -> Page:
         page = Page()
+        page.display_added.connect(self._init_display)
         idx = self.pages.addTab(page, f"페이지 {self.pages.count() + 1}")
         self.pages.setCurrentIndex(idx)
         return page
@@ -283,24 +302,88 @@ class MainWindow(QMainWindow):
     def add_display(self, kind: str):
         self.pages.currentWidget().add_display(kind)
 
-    def toggle_record(self):
-        self.recording = not self.recording
+    # --- sensors & recording ---------------------------------------------
+    def scan_devices(self):
         if self.recording:
+            return
+        self.sensors = simulated.scan()  # shortcut: simulated only; real drivers join in Phase 4
+        self.device_list.blockSignals(True)
+        self.device_list.clear()
+        for sensor in self.sensors:
+            item = QListWidgetItem(sensor.name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            item.setToolTip(", ".join(m.label for m in sensor.measurements))
+            self.device_list.addItem(item)
+        self.device_list.blockSignals(False)
+        self.device_list.setEnabled(True)
+        self.update_measurements()
+        self.statusBar().showMessage(f"장치 {len(self.sensors)}개 발견")
+
+    def active_sensors(self) -> list[Sensor]:
+        return [s for i, s in enumerate(self.sensors)
+                if self.device_list.item(i).checkState() == Qt.Checked]
+
+    def available_measurements(self):
+        return {f"{s.id}:{m.id}": (s.name, m) for s in self.active_sensors() for m in s.measurements}
+
+    def all_frames(self):
+        return [f for i in range(self.pages.count()) for f in self.pages.widget(i).displays]
+
+    def update_measurements(self):
+        items = self.available_measurements()
+        for frame in self.all_frames():
+            frame.set_measurements(items)
+            frame.refresh(self.dm)
+
+    def _init_display(self, frame):
+        frame.set_measurements(self.available_measurements())
+        frame.refresh(self.dm)
+
+    def refresh_displays(self):
+        page = self.pages.currentWidget()
+        if page:
+            for frame in page.displays:
+                frame.refresh(self.dm)
+
+    def _on_samples(self, sensor_id, t, values):  # called from sensor threads
+        for mid, y in values.items():
+            self.dm.append(f"{sensor_id}:{mid}", t, y)
+
+    def toggle_record(self):
+        if not self.recording:
+            sensors = self.active_sensors()
+            if not sensors:
+                self.statusBar().showMessage("기록할 센서가 없습니다. '장치 검색' 후 센서를 선택하세요.")
+                return
+            run = self.dm.start_run()
+            rate = SAMPLE_RATES_HZ[self.rate_combo.currentIndex()]
+            self.running_sensors = sensors
+            for sensor in sensors:
+                sensor.start(rate, self._on_samples)
+            self.recording = True
             self.elapsed.start()
             self.clock.start()
             self.record_btn.setText("■ 정지")
             self.record_btn.setStyleSheet(RECORDING_STYLE)
-            self.statusBar().showMessage("기록 중 (연결된 센서 없음 — 데이터 엔진 미구현)")
+            self.statusBar().showMessage(f"기록 중 — 런 #{run.number}, {rate} Hz")
         else:
+            for sensor in self.running_sensors:
+                sensor.stop()
+            self.dm.stop_run()
+            self.recording = False
             self.clock.stop()
+            self.refresh_displays()
             self.record_btn.setText("● 기록")
             self.record_btn.setStyleSheet(IDLE_STYLE)
-            self.statusBar().showMessage("정지")
+            self.statusBar().showMessage(f"정지 — 런 {len(self.dm.runs)}개 기록됨")
         self.rate_combo.setEnabled(not self.recording)
+        self.device_list.setEnabled(not self.recording and bool(self.sensors))
 
     def _tick(self):
         s = self.elapsed.elapsed() / 1000
         self.elapsed_label.setText(f"{int(s // 60):02d}:{s % 60:04.1f}")
+        self.refresh_displays()
 
     def not_ready(self):
         QMessageBox.information(self, "미구현", "이 기능은 아직 구현되지 않았습니다.")
