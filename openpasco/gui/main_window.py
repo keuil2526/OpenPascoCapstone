@@ -25,6 +25,7 @@ from openpasco.hardware.base import Measurement, Sensor
 from openpasco.storage import capstone_import, experiment_storage as storage
 
 FILE_FILTER = "OpenPASCO 실험 (*.opasco)"
+OPEN_FILTER = "실험 파일 (*.opasco *.cap);;OpenPASCO 실험 (*.opasco);;Capstone 실험 (*.cap)"
 SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 GRID_COLUMNS = 2
 DISPLAY_MIME = "application/x-openpasco-display"
@@ -162,12 +163,22 @@ class MainWindow(QMainWindow):
         plus.clicked.connect(self.add_page)
         self.pages.setCornerWidget(plus, Qt.TopRightCorner)
         self.setCentralWidget(self.pages)
+        self.setAcceptDrops(True)  # drop a .cap file on the window to import it
 
         self._build_actions()
         self._build_tool_dock()
         self._build_control_bar()
         self.new_experiment()
         self._restore_layout()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        urls = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        if urls and urls[0].lower().endswith(".cap"):
+            self.import_cap(urls[0])
 
     # --- construction -----------------------------------------------------
     def _build_actions(self):
@@ -453,9 +464,11 @@ class MainWindow(QMainWindow):
     def open_experiment(self):
         if self.recording:
             return
-        name, _ = QFileDialog.getOpenFileName(self, "실험 열기", "", FILE_FILTER)
+        name, _ = QFileDialog.getOpenFileName(self, "실험 열기", "", OPEN_FILTER)
         if not name:
             return
+        if name.lower().endswith(".cap"):  # Capstone files open directly, as an import
+            return self.import_cap(name)
         if not self.confirm_discard("실험 열기"):
             return
         try:
@@ -471,10 +484,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"열기: {name} — 런 {len(runs)}개"
                                      + (f" (읽을 수 없는 계산 {skipped}개 건너뜀)" if skipped else ""))
 
-    def import_cap(self):
+    def import_cap(self, name: str | None = None):
         if self.recording:
             return
-        name, _ = QFileDialog.getOpenFileName(self, "Capstone 파일 가져오기", "", "Capstone 실험 (*.cap)")
+        if not name:
+            name, _ = QFileDialog.getOpenFileName(self, "Capstone 파일 가져오기", "", "Capstone 실험 (*.cap)")
         if not name:
             return
         if not self.confirm_discard("가져오기"):

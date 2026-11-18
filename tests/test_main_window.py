@@ -553,3 +553,12 @@ def test_data_summary_dialog(win, monkeypatch):
 def test_palette_click_adds_display(win):
     win.display_list.itemClicked.emit(win.display_list.item(2))
     assert [f.kind for f in win.pages.currentWidget().displays] == ["숫자"]
+
+
+def test_open_dispatches_cap_to_import(win, tmp_path, monkeypatch):
+    from openpasco.gui import main_window as mw
+    from tests.test_capstone_import import make_cap
+    cap = make_cap(tmp_path / "lab.cap")
+    monkeypatch.setattr(mw.QFileDialog, "getOpenFileName", lambda *a, **k: (str(cap), ""))
+    win.open_experiment()
+    assert "가져옴" in win.windowTitle() and win.path is None
