@@ -190,6 +190,8 @@ def test_save_open_roundtrip(win, tmp_path, monkeypatch):
     p = str(tmp_path / "e.opasco")
     _record_a_bit(win)
     win.pages.setTabText(0, "내 실험")
+    from openpasco.core.conditions import Condition, Conditions
+    win.conditions = Conditions(Condition("measure", "sim-motion:position", "<", 0.5), Condition("time", value=3))
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
     win.save_experiment()
     assert win.path.name == "e.opasco" and "e.opasco" in win.windowTitle()
@@ -201,6 +203,7 @@ def test_save_open_roundtrip(win, tmp_path, monkeypatch):
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (p, ""))
     win.open_experiment()  # no sensors scanned: file must open on its own
     assert win.pages.tabText(0) == "내 실험" and win.rate_combo.currentText() == "100 Hz"
+    assert win.conditions.start.op == "<" and win.conditions.stop_after == 3
     graph, digits = win.pages.currentWidget().displays
     assert graph.key == "sim-motion:position" and digits.key == "sim-temp:temperature"
     assert len(graph.body.curve.getData()[0]) == n
@@ -613,3 +616,9 @@ def test_start_cards(win, monkeypatch):
     monkeypatch.setattr(win, "open_experiment", lambda: called.append(1))
     win.on_start_card("open", page.hint)
     assert called
+
+
+def test_bad_saved_conditions_are_ignored(win):
+    for bad in (None, 5, {"start": {"kind": "x"}}, {"stop": {"kind": "time", "value": "abc"}}):
+        c = win._conditions_from(bad)
+        assert c.start is None and c.stop is None

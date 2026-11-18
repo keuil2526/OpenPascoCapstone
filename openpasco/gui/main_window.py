@@ -18,7 +18,7 @@ from openpasco.core.calculation import CalcError, parse
 from openpasco.core.data_manager import Calc, DataManager, Run, Series
 from openpasco.gui import icons
 from openpasco.gui.theme import CHROME_QSS
-from openpasco.core.conditions import Conditions, Gate
+from openpasco.core.conditions import Condition, Conditions, Gate
 from openpasco.gui.widgets.calc_dialog import CalcDialog
 from openpasco.gui.widgets.conditions_dialog import ConditionsDialog
 from openpasco.gui.widgets.start_cards import StartCards
@@ -418,6 +418,7 @@ class MainWindow(QMainWindow):
         if not self.confirm_discard("새 실험"):
             return
         self.dm.clear()
+        self.conditions = Conditions()
         self.known.clear()
         self.path = self.doc_name = None
         self.pages.clear()
@@ -427,7 +428,7 @@ class MainWindow(QMainWindow):
 
     # --- files ------------------------------------------------------------
     def layout_state(self) -> dict:
-        return {"rate_index": self.rate_combo.currentIndex(),
+        return {"rate_index": self.rate_combo.currentIndex(), "conditions": asdict(self.conditions),
                 "calcs": [asdict(c) for c in self.dm.calcs.values()], "pages": [
             {"name": self.pages.tabText(i),
              "displays": [{"kind": f.kind, "key": f.key} for f in self.pages.widget(i).displays]}
@@ -447,9 +448,23 @@ class MainWindow(QMainWindow):
                     frame.selector.setCurrentIndex(idx)
                 frame.refresh(self.dm)
         self.pages.setCurrentIndex(0)
+        self.conditions = self._conditions_from(layout.get("conditions"))
         rate = layout.get("rate_index")
         if isinstance(rate, int) and 0 <= rate < self.rate_combo.count():
             self.rate_combo.setCurrentIndex(rate)
+
+    @staticmethod
+    def _conditions_from(d) -> Conditions:
+        """Rebuild saved conditions; anything malformed (older/newer file) falls back to none."""
+        def one(c):
+            try:
+                if c and c["kind"] in ("measure", "time") and c.get("op", ">") in (">", "<"):
+                    return Condition(c["kind"], str(c.get("key", "")), c.get("op", ">"), float(c.get("value", 0)))
+            except (TypeError, ValueError, KeyError):
+                pass
+            return None
+        d = d if isinstance(d, dict) else {}
+        return Conditions(one(d.get("start")), one(d.get("stop")))
 
     def _set_path(self, path):
         self.path = Path(path)
