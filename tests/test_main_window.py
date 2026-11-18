@@ -14,7 +14,11 @@ from gui.widgets.displays import DISPLAY_TYPES
 
 
 @pytest.fixture
-def win():
+def win(monkeypatch):
+    from gui import main_window
+    from hardware import simulated
+    # never touch real Bluetooth in tests
+    monkeypatch.setattr(main_window.discovery, "scan_all", lambda: (simulated.scan(), []))
     app = QApplication.instance() or QApplication([])
     app.setOrganizationName("OpenPASCO-test")
     w = MainWindow()
@@ -49,7 +53,7 @@ def test_record_needs_sensor(win):
 
 
 def test_record_toggle_locks_rate(win):
-    win.scan_devices()
+    win.scan_devices(wait=True)
     win.toggle_record()
     assert win.recording and not win.rate_combo.isEnabled()
     win.toggle_record()
@@ -59,7 +63,7 @@ def test_record_toggle_locks_rate(win):
 def test_new_experiment_resets(win, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
-    win.scan_devices()
+    win.scan_devices(wait=True)
     win.add_page()
     win.toggle_record()
     win.new_experiment()
@@ -134,7 +138,7 @@ def test_meter_paints_without_error(win, capfd, value):
 def test_new_experiment_cancel_keeps_data(win, monkeypatch):
     from PySide6.QtWidgets import QMessageBox
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
-    win.scan_devices()
+    win.scan_devices(wait=True)
     win.toggle_record()
     win.toggle_record()
     win.new_experiment()
@@ -143,7 +147,7 @@ def test_new_experiment_cancel_keeps_data(win, monkeypatch):
 
 def test_recording_end_to_end(win):
     import time
-    win.scan_devices()
+    win.scan_devices(wait=True)
     win.rate_combo.setCurrentText("100 Hz")
     page = win.pages.currentWidget()
     graph, digits = page.add_display("그래프"), page.add_display("숫자")
@@ -159,7 +163,7 @@ def test_recording_end_to_end(win):
 
 def test_unchecked_sensor_not_recorded(win):
     from PySide6.QtCore import Qt
-    win.scan_devices()
+    win.scan_devices(wait=True)
     win.device_list.item(1).setCheckState(Qt.Unchecked)  # temperature sensor off
     frame = win.pages.currentWidget().add_display("테이블")
     assert all(not k.startswith("sim-temp") for k in frame.measurements)
@@ -170,7 +174,7 @@ def test_unchecked_sensor_not_recorded(win):
 
 def _record_a_bit(win):
     import time
-    win.scan_devices()
+    win.scan_devices(wait=True)
     win.rate_combo.setCurrentText("100 Hz")
     page = win.pages.currentWidget()
     page.add_display("그래프")
@@ -275,3 +279,27 @@ def test_import_cap_into_window(win, tmp_path, monkeypatch):
     assert win.pages.tabText(0) == "lab" and "가져옴" in win.windowTitle() and win.path is None
     graph = win.pages.currentWidget().displays[0]
     assert graph.key == "cap:Force" and len(graph.body.curve.getData()[0]) == 2  # newest run (#2) has 2 samples
+
+
+def test_sensor_error_stops_recording(win, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    shown = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: shown.append(a[2]))
+    win.scan_devices(wait=True)
+    win.toggle_record()
+    win.sensors[0].on_error("연결 끊김")  # called from a "sensor thread"; here the main thread
+    QApplication.processEvents()
+    assert not win.recording and shown == ["연결 끊김"]
+    assert "연결 끊김" in win.statusBar().currentMessage()
+
+
+def test_scan_warnings_shown_and_rescan_closes_old(win, monkeypatch):
+    from gui import main_window
+    from hardware import simulated
+    closed = []
+    win.scan_devices(wait=True)
+    win.sensors[0].close = lambda: closed.append(1)
+    monkeypatch.setattr(main_window.discovery, "scan_all", lambda: (simulated.scan(), ["BLE 실패"]))
+    win.scan_devices(wait=True)
+    assert closed == [1] and "BLE 실패" in win.statusBar().currentMessage()
+    assert win.scan_btn.isEnabled() and not win.scanning

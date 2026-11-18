@@ -28,6 +28,9 @@ class Sensor(ABC):
     id: str
     name: str
     measurements: list[Measurement]
+    # Set by the app. Drivers call it (from their thread) with a message when sampling dies,
+    # e.g. a lost Bluetooth connection.
+    on_error: Callable[[str], None] | None = None
 
     @abstractmethod
     def start(self, rate_hz: float, on_samples: SampleCallback) -> None:
@@ -36,3 +39,6 @@ class Sensor(ABC):
     @abstractmethod
     def stop(self) -> None:
         """Stop sampling. Must not return until no more callbacks will fire."""
+
+    def close(self) -> None:
+        """Release the device (disconnect). Default: nothing to release."""

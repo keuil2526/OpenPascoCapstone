@@ -1,4 +1,5 @@
 """OpenPASCO main window: pages of displays, side tool panel, recording control bar."""
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, Qt, QTimer, Signal
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import (
 
 from core.data_manager import DataManager
 from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
-from hardware import simulated
+from hardware import discovery
 from hardware.base import Sensor
 from storage import capstone_import, experiment_storage as storage
 
@@ -123,6 +124,9 @@ class Page(QWidget):
 
 
 class MainWindow(QMainWindow):
+    scan_done = Signal(list, list)  # sensors, warnings; emitted from the scan thread
+    sensor_error = Signal(str)  # emitted from sensor threads
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("OpenPASCO")
@@ -130,9 +134,12 @@ class MainWindow(QMainWindow):
         self.recording = False
         self.dm = DataManager()
         self.sensors: list[Sensor] = []
+        self.scanning = False
         self.known: dict = {}  # key -> (sensor name, Measurement) from opened files
         self.path: Path | None = None
 
+        self.scan_done.connect(self._on_scan_done)
+        self.sensor_error.connect(self._on_sensor_error)
         self.pages = QTabWidget(tabsClosable=True, movable=True, documentMode=True)
         self.pages.tabCloseRequested.connect(self.close_page)
         self.pages.tabBarDoubleClicked.connect(self.rename_page)
@@ -203,7 +210,7 @@ class MainWindow(QMainWindow):
         self.device_list.setEnabled(False)
         self.device_list.itemChanged.connect(lambda _: self.update_measurements())
         layout.addWidget(self.device_list, 1)
-        scan = QPushButton("장치 검색", clicked=self.scan_devices)
+        self.scan_btn = scan = QPushButton("장치 검색", clicked=self.scan_devices)
         scan.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
         layout.addWidget(scan)
 
@@ -272,6 +279,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.recording:
             self.toggle_record()  # stop sensor threads
+        for s in self.sensors:
+            s.close()  # disconnect Bluetooth devices
         s = QSettings()
         s.setValue("geometry", self.saveGeometry())
         s.setValue("windowState", self.saveState())
@@ -444,10 +453,29 @@ class MainWindow(QMainWindow):
         self.pages.currentWidget().add_display(kind)
 
     # --- sensors & recording ---------------------------------------------
-    def scan_devices(self):
-        if self.recording:
+    def scan_devices(self, wait=False):
+        """Search in a worker thread (BLE takes seconds). wait=True blocks until done (tests)."""
+        if self.recording or self.scanning:
             return
-        self.sensors = simulated.scan()  # shortcut: simulated only; real drivers join in Phase 4
+        self.scanning = True
+        self.scan_btn.setEnabled(False)
+        self.device_list.setEnabled(False)
+        for s in self.sensors:
+            s.close()  # old connections are replaced by the new scan
+        self.statusBar().showMessage("장치 검색 중… (블루투스 검색은 5초 정도 걸립니다)")
+        thread = threading.Thread(target=lambda: self.scan_done.emit(*discovery.scan_all()),
+                                  name="scan", daemon=True)
+        thread.start()
+        if wait:
+            thread.join()
+            QApplication.processEvents()  # deliver the queued scan_done
+
+    def _on_scan_done(self, sensors, warnings):
+        self.scanning = False
+        self.scan_btn.setEnabled(True)
+        self.sensors = sensors
+        for s in sensors:
+            s.on_error = self.sensor_error.emit
         self.device_list.blockSignals(True)
         self.device_list.clear()
         for sensor in self.sensors:
@@ -459,7 +487,16 @@ class MainWindow(QMainWindow):
         self.device_list.blockSignals(False)
         self.device_list.setEnabled(True)
         self.update_measurements()
-        self.statusBar().showMessage(f"장치 {len(self.sensors)}개 발견")
+        msg = f"장치 {len(self.sensors)}개 발견"
+        self.statusBar().showMessage(msg + (" — " + " / ".join(warnings) if warnings else ""))
+        if warnings:
+            self.device_list.setToolTip("\n".join(warnings))
+
+    def _on_sensor_error(self, message: str):
+        if self.recording:
+            self.toggle_record()
+        self.statusBar().showMessage(f"센서 오류로 기록을 멈췄습니다: {message}")
+        QMessageBox.warning(self, "센서 오류", message)
 
     def active_sensors(self) -> list[Sensor]:
         return [s for i, s in enumerate(self.sensors)
