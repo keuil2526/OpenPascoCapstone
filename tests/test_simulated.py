@@ -3,7 +3,7 @@ import time
 
 import numpy as np
 
-from hardware import simulated
+from openpasco.hardware import simulated
 
 
 def test_scan_returns_sensors_with_measurements():

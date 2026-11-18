@@ -1,7 +1,7 @@
 # Capstone `.cap` 파일 형식 (실측 기반 메모)
 
 공식 명세가 없으므로 **샘플 파일 44개**(사용자 실험 파일과 Wine에 설치된 Capstone의 QuickStart 템플릿, Capstone 버전 1.11 ~ 2.13)를 직접 분석해 얻은 결과다. 확인하지 못한 부분은 "미확인"으로 표시했다.
-구현: [storage/capstone_import.py](../storage/capstone_import.py) (읽기 전용 가져오기만 지원, `.cap` 쓰기는 지원하지 않음).
+구현: [storage/capstone_import.py](../openpasco/storage/capstone_import.py) (읽기 전용 가져오기만 지원, `.cap` 쓰기는 지원하지 않음).
 
 ## 컨테이너
 

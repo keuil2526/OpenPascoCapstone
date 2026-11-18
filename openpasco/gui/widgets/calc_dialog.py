@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QListWidget, QVBoxLayout,
 )
 
-from core.calculation import CalcError, FUNCS
+from openpasco.core.calculation import CalcError, FUNCS
 
 
 class CalcDialog(QDialog):

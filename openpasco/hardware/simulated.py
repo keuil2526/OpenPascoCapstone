@@ -5,7 +5,7 @@ from typing import Callable
 
 import numpy as np
 
-from hardware.base import Measurement, SampleCallback, Sensor
+from openpasco.hardware.base import Measurement, SampleCallback, Sensor
 
 CHUNK_SECONDS = 0.02  # deliver samples in ~20 ms batches
 

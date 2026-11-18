@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openpasco"
+version = "0.1.0"
+description = "Linux용 PASCO 센서 데이터 수집·분석 프로그램 (개인·비상업·교육 목적)"
+readme = "README.md"
+requires-python = ">=3.14"  # only tested on 3.14; lower versions are untried
+dependencies = [
+    "PySide6-Essentials>=6.10",  # QtCore/Gui/Widgets only; the full PySide6 adds ~500 MB we do not use
+    "pyqtgraph>=0.14",
+    "numpy>=2.0",
+    "scipy>=1.14",
+]
+
+[project.optional-dependencies]
+# PASCO's own BLE library: personal/non-commercial/educational licence, never bundled.
+pasco = ["pasco>=0.3.66"]
+dev = ["pytest>=9.0"]
+
+[project.gui-scripts]
+openpasco = "openpasco.app:main"
+
+[tool.setuptools.packages.find]
+include = ["openpasco*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

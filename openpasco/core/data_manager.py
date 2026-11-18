@@ -8,7 +8,7 @@ from datetime import datetime
 
 import numpy as np
 
-from core.calculation import CalcError, evaluate
+from openpasco.core.calculation import CalcError, evaluate
 
 
 class Series:
@@ -60,10 +60,14 @@ class DataManager:
 
     def start_run(self) -> Run:
         with self._lock:
-            run = Run(len(self.runs) + 1, datetime.now())
+            run = Run(max((r.number for r in self.runs), default=0) + 1, datetime.now())
             self.runs.append(run)
             self.recording = True
             return run
+
+    def delete_last_run(self) -> Run | None:
+        with self._lock:
+            return None if self.recording or not self.runs else self.runs.pop()
 
     def stop_run(self):
         with self._lock:

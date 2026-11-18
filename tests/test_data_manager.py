@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from core.data_manager import DataManager, Series
+from openpasco.core.data_manager import DataManager, Series
 
 
 def test_series_grows_and_keeps_old_views():

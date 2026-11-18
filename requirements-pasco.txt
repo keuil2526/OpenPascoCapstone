@@ -1,5 +1,0 @@
-# Optional: official PASCO BLE library (wireless sensors, Smart Cart, //code.Node).
-# Its license (PASCO "End User License Agreement for Source Code") allows personal,
-# non-commercial and educational use only. It is NOT bundled with OpenPASCO; install it yourself:
-#   .venv/bin/pip install -r requirements-pasco.txt
-pasco>=0.3.66

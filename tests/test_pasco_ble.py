@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from hardware import pasco_ble
+from openpasco.hardware import pasco_ble
 
 
 class FakeDevice:

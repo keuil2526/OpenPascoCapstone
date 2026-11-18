@@ -3,35 +3,31 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QMimeData, QSettings, QSize, Qt, QTimer, Signal
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtGui import QAction, QColor, QFont, QKeySequence, QPalette
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QFileDialog, QComboBox, QDockWidget, QHBoxLayout, QInputDialog,
-    QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter, QStyle,
-    QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QDockWidget, QFileDialog, QHBoxLayout,
+    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
+    QPushButton, QSplitter, QStyle, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
-from core.calculation import CalcError, parse
-from core.data_manager import Calc, DataManager, Run, Series
-from gui.widgets.calc_dialog import CalcDialog
-from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
-from hardware import discovery
-from hardware.base import Measurement, Sensor
-from storage import capstone_import, experiment_storage as storage
+from openpasco.core.calculation import CalcError, parse
+from openpasco.core.data_manager import Calc, DataManager, Run, Series
+from openpasco.gui import icons
+from openpasco.gui.theme import CHROME_QSS
+from openpasco.gui.widgets.calc_dialog import CalcDialog
+from openpasco.gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
+from openpasco.hardware import discovery
+from openpasco.hardware.base import Measurement, Sensor
+from openpasco.storage import capstone_import, experiment_storage as storage
 
 FILE_FILTER = "OpenPASCO 실험 (*.opasco)"
 SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 GRID_COLUMNS = 2
 DISPLAY_MIME = "application/x-openpasco-display"
-
-RECORD_STYLE = """
-QPushButton { background: %s; color: white; font-weight: bold;
-              border: none; border-radius: 4px; padding: 6px 14px; }
-QPushButton:hover { background: %s; }
-"""
-
 
 def dark_palette() -> QPalette:
     pal = QPalette()
@@ -49,19 +45,26 @@ def dark_palette() -> QPalette:
     return pal
 
 
-IDLE_STYLE = RECORD_STYLE % ("#2e7d32", "#388e3c")
-RECORDING_STYLE = RECORD_STYLE % ("#c62828", "#d32f2f")
-
-
 class DisplayPalette(QListWidget):
     """List of display types; items can be dragged onto a page."""
 
+    ICON_FOR = {"그래프": "graph", "테이블": "table", "숫자": "digits", "미터": "meter"}
+
     def __init__(self):
         super().__init__()
-        self.addItems(DISPLAY_TYPES)
+        self.setObjectName("display_list")
+        for name in DISPLAY_TYPES:
+            self.addItem(QListWidgetItem(icons.icon(self.ICON_FOR[name]), name))
+        self.setViewMode(QListView.IconMode)
+        self.setFlow(QListView.TopToBottom)
+        self.setMovement(QListView.Static)  # required for drag-out
+        self.setWrapping(False)
+        self.setIconSize(QSize(36, 36))
+        self.setGridSize(QSize(84, 66))
+        self.setFixedWidth(96)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragOnly)
-        self.setToolTip("페이지로 끌어다 놓거나 더블클릭하여 추가")
+        self.setToolTip("클릭하거나 페이지로 끌어다 놓아 디스플레이를 추가")
 
     def mimeData(self, items):
         mime = QMimeData()
@@ -77,6 +80,7 @@ class Page(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("page")
         self.setAcceptDrops(True)
         self.box = QVBoxLayout(self)
         self.displays: list[DisplayFrame] = []
@@ -136,6 +140,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("OpenPASCO")
+        self.setStyleSheet(CHROME_QSS)
         self.resize(1280, 800)
         self.recording = False
         self.dm = DataManager()
@@ -188,6 +193,8 @@ class MainWindow(QMainWindow):
                                    lambda: self.rename_page(self.pages.currentIndex()), "F2")
         self.act_record = act("기록 / 정지", self.toggle_record, "Ctrl+R", QStyle.SP_MediaPlay)
         self.act_calc = act("계산 추가…", self.add_calculation, "Ctrl+L")
+        self.act_conditions = act("기록 조건…", self.set_recording_conditions)
+        self.act_delete_run = act("마지막 런 삭제", self.delete_last_run)
         self.act_calc_delete = act("계산 삭제…", self.remove_calculation)
 
         mb = self.menuBar()
@@ -196,7 +203,8 @@ class MainWindow(QMainWindow):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
         page_menu = mb.addMenu("페이지(&P)")
         page_menu.addActions([self.act_add_page, self.act_rename_page])
-        mb.addMenu("측정(&M)").addActions([self.act_record, self.act_calc, self.act_calc_delete])
+        mb.addMenu("측정(&M)").addActions([self.act_record, self.act_conditions, self.act_delete_run,
+                                          self.act_calc, self.act_calc_delete])
         self.view_menu = mb.addMenu("보기(&V)")
         self.act_dark = QAction("다크 모드", self, checkable=True, toggled=self.set_dark)
         self.view_menu.addAction(self.act_dark)
@@ -211,62 +219,101 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
 
     def _build_tool_dock(self):
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
+        # left: tool palette + hardware panel
+        palette = QWidget(objectName="palette")
+        pl = QVBoxLayout(palette)
+        pl.setContentsMargins(4, 6, 4, 6)
 
-        layout.addWidget(QLabel("<b>하드웨어 설정</b>"))
+        def tool(text, icon_name, slot, checkable=False):
+            b = QToolButton(objectName="tool_btn", text=text, icon=icons.icon(icon_name), checkable=checkable)
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            b.setIconSize(QSize(36, 36))
+            b.setFixedWidth(76)
+            b.clicked.connect(slot)
+            pl.addWidget(b)
+            return b
+
+        self.hw_btn = tool("하드웨어\n설정", "hardware", lambda on: self.hw_panel.setVisible(on), True)
+        self.hw_btn.setChecked(True)
+        tool("데이터\n요약", "summary", self.show_data_summary)
+        tool("계산기", "calculator", self.add_calculation)
+        pl.addStretch()
+
+        self.hw_panel = QWidget(objectName="hw_panel")
+        hl = QVBoxLayout(self.hw_panel)
+        hl.setContentsMargins(4, 6, 6, 6)
+        hl.addWidget(QLabel("<b>하드웨어 설정</b>"))
         self.device_list = QListWidget()
         self.device_list.addItem("연결된 장치 없음 — '장치 검색'을 누르세요")
         self.device_list.setEnabled(False)
         self.device_list.itemChanged.connect(lambda _: self.update_measurements())
-        layout.addWidget(self.device_list, 1)
-        self.scan_btn = scan = QPushButton("장치 검색", clicked=self.scan_devices)
-        scan.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
-        layout.addWidget(scan)
+        hl.addWidget(self.device_list, 1)
+        self.scan_btn = QPushButton("장치 검색", clicked=self.scan_devices)
+        self.scan_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        hl.addWidget(self.scan_btn)
+        self.hw_panel.setFixedWidth(210)
 
-        layout.addSpacing(8)
-        layout.addWidget(QLabel("<b>디스플레이</b>"))
-        self.display_list = DisplayPalette()
-        self.display_list.itemDoubleClicked.connect(lambda item: self.add_display(item.text()))
-        layout.addWidget(self.display_list, 1)
-
+        left = QWidget(objectName="palette")
+        row = QHBoxLayout(left)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addWidget(palette)
+        row.addWidget(self.hw_panel)
         dock = QDockWidget("도구", self, objectName="tool_dock")
         dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
-        dock.setWidget(panel)
+        dock.setWidget(left)
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
         self.view_menu.addAction(dock.toggleViewAction())
 
+        # right: display palette
+        self.display_list = DisplayPalette()
+        self.display_list.itemClicked.connect(lambda item: self.add_display(item.text()))
+        right = QDockWidget("디스플레이", self, objectName="display_dock")
+        right.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
+        right.setWidget(self.display_list)
+        self.addDockWidget(Qt.RightDockWidgetArea, right)
+        self.view_menu.addAction(right.toggleViewAction())
+
     def _build_control_bar(self):
         bar = QToolBar("측정 제어", movable=False, objectName="control_bar")
-        container = QWidget()
+        container = QWidget(objectName="control_row")
         row = QHBoxLayout(container)
-        row.setContentsMargins(6, 4, 6, 4)
+        row.setContentsMargins(10, 2, 10, 2)
+        row.setSpacing(10)
 
-        self.record_btn = QPushButton("● 기록", clicked=self.toggle_record)
-        self.record_btn.setMinimumWidth(110)
-        self.record_btn.setToolTip("기록 시작/정지 (Ctrl+R)")
-        self.record_btn.setStyleSheet(IDLE_STYLE)
+        def button(name, text, icon_name, slot, tip):
+            b = QToolButton(objectName=name, text=text, icon=icons.icon(icon_name), toolTip=tip)
+            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            b.setIconSize(QSize(34, 34))
+            b.setMinimumWidth(70)
+            b.clicked.connect(slot)
+            return b
+
+        self.record_btn = button("record_btn", "기록", "record", self.toggle_record, "기록 시작/정지 (Ctrl+R)")
         row.addWidget(self.record_btn)
 
-        row.addSpacing(12)
-        row.addWidget(QLabel("샘플링 속도:"))
+        self.timer_label = self.elapsed_label = QLabel("00:00.00", objectName="timer")
+        row.addWidget(self.timer_label)
+
+        row.addWidget(QLabel("샘플링 속도"))
         self.rate_combo = QComboBox()
         self.rate_combo.addItems([f"{r} Hz" for r in SAMPLE_RATES_HZ])
         self.rate_combo.setCurrentText("10 Hz")
         row.addWidget(self.rate_combo)
 
-        row.addSpacing(20)
-        self.elapsed_label = QLabel("00:00.0")
-        font = QFont("monospace")
-        font.setStyleHint(QFont.Monospace)
-        font.setPointSize(14)
-        self.elapsed_label.setFont(font)
-        row.addWidget(self.elapsed_label)
+        self.conditions_btn = button("action_btn", "기록 조건", "clock", self.set_recording_conditions,
+                                     "자동 정지 시간 설정")
+        self.delete_run_btn = button("action_btn", "마지막 런\n삭제", "trash", self.delete_last_run,
+                                     "가장 최근에 기록한 런을 삭제")
+        row.addSpacing(12)
+        row.addWidget(self.conditions_btn)
+        row.addWidget(self.delete_run_btn)
         row.addStretch()
 
         bar.addWidget(container)
         self.addToolBar(Qt.BottomToolBarArea, bar)
 
+        self.stop_after: float | None = None  # seconds; None = record until stopped
         self.elapsed = QElapsedTimer()
         self.clock = QTimer(self, interval=33, timeout=self._tick)  # ~30 fps display refresh
 
@@ -676,8 +723,10 @@ class MainWindow(QMainWindow):
             self.recording = True
             self.elapsed.start()
             self.clock.start()
-            self.record_btn.setText("■ 정지")
-            self.record_btn.setStyleSheet(RECORDING_STYLE)
+            self.record_btn.setText("정지")
+            self.record_btn.setIcon(icons.icon("stop"))
+            self.timer_label.setProperty("recording", True)
+            self.timer_label.style().polish(self.timer_label)
             self.statusBar().showMessage(f"기록 중 — 런 #{run.number}, {rate} Hz")
         else:
             for sensor in self.running_sensors:
@@ -686,16 +735,66 @@ class MainWindow(QMainWindow):
             self.recording = False
             self.clock.stop()
             self.refresh_displays()
-            self.record_btn.setText("● 기록")
-            self.record_btn.setStyleSheet(IDLE_STYLE)
+            self.record_btn.setText("기록")
+            self.record_btn.setIcon(icons.icon("record"))
+            self.timer_label.setProperty("recording", False)
+            self.timer_label.style().polish(self.timer_label)
             self.statusBar().showMessage(f"정지 — 런 {len(self.dm.runs)}개 기록됨")
         self.rate_combo.setEnabled(not self.recording)
         self.device_list.setEnabled(not self.recording and bool(self.sensors))
 
     def _tick(self):
         s = self.elapsed.elapsed() / 1000
-        self.elapsed_label.setText(f"{int(s // 60):02d}:{s % 60:04.1f}")
+        self.elapsed_label.setText(f"{int(s // 60):02d}:{s % 60:05.2f}")
+        if self.stop_after and s >= self.stop_after:
+            self.toggle_record()  # auto-stop reached
+            return
         self.refresh_displays()
+
+    def set_recording_conditions(self):
+        value, ok = QInputDialog.getDouble(
+            self, "기록 조건", "자동 정지 시간 (초, 0 = 직접 정지할 때까지):",
+            self.stop_after or 0.0, 0.0, 86400.0, 1)
+        if ok:
+            self.stop_after = value or None
+            self.statusBar().showMessage(
+                f"기록 조건: {value:g}초 후 자동 정지" if value else "기록 조건: 직접 정지할 때까지 기록")
+
+    def delete_last_run(self):
+        if self.recording or not self.dm.runs:
+            self.statusBar().showMessage("삭제할 런이 없습니다." if not self.recording else "기록 중에는 삭제할 수 없습니다.")
+            return
+        n = self.dm.runs[-1].number
+        if QMessageBox.question(self, "런 삭제", f"런 #{n}을(를) 삭제할까요? 되돌릴 수 없습니다.") != QMessageBox.Yes:
+            return
+        self.dm.delete_last_run()
+        self._mark_dirty()
+        self.update_measurements()
+        self.statusBar().showMessage(f"런 #{n} 삭제됨 — 남은 런 {len(self.dm.runs)}개")
+
+    def show_data_summary(self):
+        """Table of how many samples each measurement has in each run."""
+        runs = self.dm.runs
+        if not runs:
+            self.statusBar().showMessage("요약할 기록이 없습니다.")
+            return
+        names = {k: v[1].label for k, v in self._all_measurements().items()}
+        keys = sorted({k for r in runs for k in r.series})
+        dlg = QDialog(self)
+        dlg.setWindowTitle("데이터 요약")
+        table = QTableWidget(len(keys), len(runs))
+        table.setHorizontalHeaderLabels([f"런 #{r.number}" for r in runs])
+        table.setVerticalHeaderLabels([names.get(k, k) for k in keys])
+        for i, k in enumerate(keys):
+            for j, r in enumerate(runs):
+                s = r.series.get(k)
+                table.setItem(i, j, QTableWidgetItem(str(s.n) if s else "—"))
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("측정값별 샘플 수"))
+        lay.addWidget(table)
+        dlg.resize(560, 340)
+        dlg.exec()
 
     def not_ready(self):
         QMessageBox.information(self, "미구현", "이 기능은 아직 구현되지 않았습니다.")

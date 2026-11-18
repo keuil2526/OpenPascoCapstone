@@ -16,8 +16,8 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from core.data_manager import Run, Series
-from hardware.base import Measurement
+from openpasco.core.data_manager import Run, Series
+from openpasco.hardware.base import Measurement
 
 MAX_XML_BYTES = 200 * 1024 * 1024
 MAX_DATA_BYTES = 512 * 1024 * 1024

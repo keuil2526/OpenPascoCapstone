@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from analysis.numeric import MODELS, derivative, fit, integral, select, statistics
-from hardware.base import Measurement
+from openpasco.analysis.numeric import MODELS, derivative, fit, integral, select, statistics
+from openpasco.hardware.base import Measurement
 
 
 class DisplayFrame(QFrame):
@@ -25,6 +25,7 @@ class DisplayFrame(QFrame):
 
     def __init__(self, title: str, body: QWidget):
         super().__init__()
+        self.setObjectName("display_frame")
         self.setFrameShape(QFrame.StyledPanel)
         self.body = body
         self.kind = title

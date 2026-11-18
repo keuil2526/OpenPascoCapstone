@@ -5,9 +5,9 @@ from datetime import datetime
 import numpy as np
 import pytest
 
-from core.data_manager import Run, Series
-from hardware.base import Measurement
-from storage import experiment_storage as st
+from openpasco.core.data_manager import Run, Series
+from openpasco.hardware.base import Measurement
+from openpasco.storage import experiment_storage as st
 
 M = {"s:x": ("센서", Measurement("x", "위치", "m", -1, 1))}
 

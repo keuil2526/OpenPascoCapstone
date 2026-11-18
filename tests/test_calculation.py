@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from core.calculation import CalcError, evaluate, parse
+from openpasco.core.calculation import CalcError, evaluate, parse
 
 T = np.arange(5) * 0.5
 DATA = {"위치": (T, np.array([0., 1, 2, 3, 4])), "force": (T, np.array([2., 2, 2, 2, 2])),

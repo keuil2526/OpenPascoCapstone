@@ -8,8 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-from core.data_manager import Run, Series
-from hardware.base import Measurement
+from openpasco.core.data_manager import Run, Series
+from openpasco.hardware.base import Measurement
 
 FORMAT_VERSION = 1
 

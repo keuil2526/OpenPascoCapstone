@@ -1,6 +1,6 @@
 """PASCO wireless (BLE) sensors through PASCO's own `pasco` Python library.
 
-The library is optional and not bundled (personal/educational licence, see requirements-pasco.txt).
+The library is optional and not bundled (personal/educational licence, see pyproject.toml).
 We only call its public API; no code from it is copied here.
 UNTESTED WITH REAL HARDWARE: written against the library's documented API and verified with fakes.
 """
@@ -9,14 +9,14 @@ import time
 
 import numpy as np
 
-from hardware.base import Measurement, SampleCallback, Sensor
+from openpasco.hardware.base import Measurement, SampleCallback, Sensor
 
 try:
     from pasco import PASCOBLEDevice
 except ImportError:  # optional dependency
     PASCOBLEDevice = None
 
-MISSING_LIB = "pasco 라이브러리가 없어 BLE 센서는 검색하지 않았습니다 (pip install -r requirements-pasco.txt)"
+MISSING_LIB = "pasco 라이브러리가 없어 BLE 센서는 검색하지 않았습니다 (./install.sh --with-pasco)"
 DEFAULT_RANGE = (0.0, 10.0)  # shortcut: real display ranges are not read from the device yet
 
 

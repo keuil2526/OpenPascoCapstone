@@ -9,14 +9,14 @@ from PySide6.QtCore import QMimeData, QPointF, Qt
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication
 
-from gui.main_window import DISPLAY_MIME, MainWindow
-from gui.widgets.displays import DISPLAY_TYPES
+from openpasco.gui.main_window import DISPLAY_MIME, MainWindow
+from openpasco.gui.widgets.displays import DISPLAY_TYPES
 
 
 @pytest.fixture
 def win(monkeypatch):
-    from gui import main_window
-    from hardware import simulated
+    from openpasco.gui import main_window
+    from openpasco.hardware import simulated
     # never touch real Bluetooth in tests
     monkeypatch.setattr(main_window.discovery, "scan_all", lambda: (simulated.scan(), []))
     app = QApplication.instance() or QApplication([])
@@ -111,7 +111,7 @@ def test_displays_survive_relayout(win):
 
 
 def test_meter_angle_clamps():
-    from gui.widgets.displays import Meter
+    from openpasco.gui.widgets.displays import Meter
     m = Meter(0, 10)
     assert m._angle(0) == 210 and m._angle(10) == -30 and m._angle(5) == 90
     assert m._angle(-5) == m._angle(0) and m._angle(99) == m._angle(10)
@@ -128,7 +128,7 @@ def test_dark_mode_restyles_plots(win):
 
 @pytest.mark.parametrize("value", [None, 3.7, -100])
 def test_meter_paints_without_error(win, capfd, value):
-    from gui.widgets.displays import Meter
+    from openpasco.gui.widgets.displays import Meter
     m = Meter(0, 10, "N")
     m.resize(200, 180)
     m.set_value(value)
@@ -232,7 +232,7 @@ def test_export_csv(win, tmp_path, monkeypatch):
 
 
 def _graph_with_data(win, t, y):
-    from hardware.base import Measurement
+    from openpasco.hardware.base import Measurement
     g = win.pages.currentWidget().add_display("그래프").body
     g.show(Measurement("x", "위치", "m", 0, 1), (t, y))
     return g
@@ -295,8 +295,8 @@ def test_sensor_error_stops_recording(win, monkeypatch):
 
 
 def test_scan_warnings_shown_and_rescan_closes_old(win, monkeypatch):
-    from gui import main_window
-    from hardware import simulated
+    from openpasco.gui import main_window
+    from openpasco.hardware import simulated
     closed = []
     win.scan_devices(wait=True)
     win.sensors[0].close = lambda: closed.append(1)
@@ -317,7 +317,7 @@ def _record_motion(win, seconds=0.25):
 
 def test_calculation_end_to_end(win):
     import numpy as np
-    from core.calculation import CalcError
+    from openpasco.core.calculation import CalcError
     _record_motion(win)
     calc = win.create_calc("2배 위치", "m", "[위치] * 2")
     assert calc.refs == {"위치": "sim-motion:position"} and "calc:2배 위치" in win.known
@@ -367,7 +367,7 @@ def test_corrupt_saved_calcs_are_skipped(win):
 
 
 def test_calc_dialog_keeps_open_on_error(win):
-    from gui.widgets.calc_dialog import CalcDialog
+    from openpasco.gui.widgets.calc_dialog import CalcDialog
     win.scan_devices(wait=True)
     dlg = CalcDialog(win, ["위치"], win.create_calc)
     dlg.name.setText("x")
@@ -469,7 +469,7 @@ def test_confirm_discard_stops_recording(win, monkeypatch):
 
 
 def test_delete_calc_and_dependents(win):
-    from core.calculation import CalcError
+    from openpasco.core.calculation import CalcError
     _record_motion(win)
     win.create_calc("a", "", "[위치] * 2")
     win.create_calc("b", "", "[a] + 1")
@@ -497,3 +497,59 @@ def test_csv_includes_calculations(win, tmp_path, monkeypatch):
     first = rows[5]
     assert float(first[dbl]) == pytest.approx(2 * float(first[pos]), rel=1e-6)
     assert len(win.dm.runs[-1].series) == 3 and not any("calc" in k for k in win.dm.runs[-1].series)  # run untouched
+
+
+def test_recording_conditions_auto_stop(win, monkeypatch):
+    import time
+    from PySide6.QtWidgets import QInputDialog
+    monkeypatch.setattr(QInputDialog, "getDouble", lambda *a, **k: (0.2, True))
+    win.set_recording_conditions()
+    assert win.stop_after == 0.2
+    win.scan_devices(wait=True)
+    win.toggle_record()
+    end = time.time() + 2
+    while win.recording and time.time() < end:  # the clock timer must stop it
+        QApplication.processEvents()
+        time.sleep(0.01)
+    assert not win.recording and len(win.dm.runs) == 1
+    monkeypatch.setattr(QInputDialog, "getDouble", lambda *a, **k: (0.0, True))
+    win.set_recording_conditions()
+    assert win.stop_after is None
+
+
+def test_delete_last_run_and_numbering(win, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    _record_motion(win, 0.1)
+    _record_motion(win, 0.1)
+    assert [r.number for r in win.dm.runs] == [1, 2]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+    win.delete_last_run()
+    assert len(win.dm.runs) == 2
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    win.delete_last_run()
+    assert [r.number for r in win.dm.runs] == [1] and win.dirty
+    win.toggle_record(); win.toggle_record()  # next run must not reuse a live number
+    assert [r.number for r in win.dm.runs] == [1, 2]
+    win.dm.runs[0].number = 7  # e.g. imported file with gaps
+    win.toggle_record(); win.toggle_record()
+    assert [r.number for r in win.dm.runs] == [7, 2, 8]
+    win.dm.delete_last_run(); win.dm.delete_last_run(); win.dm.delete_last_run()
+    assert win.dm.delete_last_run() is None  # nothing left
+
+
+def test_data_summary_dialog(win, monkeypatch):
+    from PySide6.QtWidgets import QDialog, QTableWidget
+    seen = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: seen.update(dlg=self))
+    win.show_data_summary()
+    assert not seen and "요약할 기록이 없습니다" in win.statusBar().currentMessage()
+    _record_motion(win, 0.1)
+    win.show_data_summary()
+    table = seen["dlg"].findChild(QTableWidget)
+    assert table.columnCount() == 1 and table.rowCount() == 3
+    assert int(table.item(0, 0).text()) > 3 and table.horizontalHeaderItem(0).text() == "런 #1"
+
+
+def test_palette_click_adds_display(win):
+    win.display_list.itemClicked.emit(win.display_list.item(2))
+    assert [f.kind for f in win.pages.currentWidget().displays] == ["숫자"]

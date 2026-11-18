@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from analysis import numeric as nm
+from openpasco.analysis import numeric as nm
 
 T = np.linspace(0, 10, 501)
 

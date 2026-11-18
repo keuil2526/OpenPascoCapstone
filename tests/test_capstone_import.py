@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from storage.capstone_import import load_cap
+from openpasco.storage.capstone_import import load_cap
 
 XML = """<DSProExperiment><Header Version="2.10.8"/>
 <DataSource LongName="Force">{sets}</DataSource>
