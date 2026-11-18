@@ -264,3 +264,14 @@ def test_graph_derivative_and_errors(win):
     assert "데이터가 없습니다" in g.result.text()
     g.show(None, None)  # data cleared: no crash, empty result
     assert g.result.text() == ""
+
+
+def test_import_cap_into_window(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    from tests.test_capstone_import import make_cap
+    p = make_cap(tmp_path / "lab.cap")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(p), ""))
+    win.import_cap()
+    assert win.pages.tabText(0) == "lab" and "가져옴" in win.windowTitle() and win.path is None
+    graph = win.pages.currentWidget().displays[0]
+    assert graph.key == "cap:Force" and len(graph.body.curve.getData()[0]) == 2  # newest run (#2) has 2 samples

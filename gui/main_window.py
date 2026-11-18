@@ -14,7 +14,7 @@ from core.data_manager import DataManager
 from gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
 from hardware import simulated
 from hardware.base import Sensor
-from storage import experiment_storage as storage
+from storage import capstone_import, experiment_storage as storage
 
 FILE_FILTER = "OpenPASCO 실험 (*.opasco)"
 SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         self.act_save_as = act("다른 이름으로 저장…", lambda: self.save_experiment(as_new=True),
                                QKeySequence.SaveAs)
         self.act_export = act("CSV 내보내기…", self.export_csv)
+        self.act_import_cap = act("Capstone 파일 가져오기 (.cap)…", self.import_cap)
         self.act_quit = act("종료", self.close, QKeySequence.Quit)
         self.act_add_page = act("페이지 추가", self.add_page, "Ctrl+T", QStyle.SP_FileDialogNewFolder)
         self.act_rename_page = act("페이지 이름 바꾸기…",
@@ -174,7 +175,7 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()
         file_menu = mb.addMenu("파일(&F)")
-        for a in (self.act_new, self.act_open, self.act_save, self.act_save_as, None, self.act_export, None, self.act_quit):
+        for a in (self.act_new, self.act_open, self.act_save, self.act_save_as, None, self.act_export, self.act_import_cap, None, self.act_quit):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
         page_menu = mb.addMenu("페이지(&P)")
         page_menu.addActions([self.act_add_page, self.act_rename_page])
@@ -364,6 +365,39 @@ class MainWindow(QMainWindow):
         self.apply_layout(layout)
         self._set_path(name)
         self.statusBar().showMessage(f"열기: {name} — 런 {len(runs)}개")
+
+    def import_cap(self):
+        if self.recording:
+            return
+        name, _ = QFileDialog.getOpenFileName(self, "Capstone 파일 가져오기", "", "Capstone 실험 (*.cap)")
+        if not name:
+            return
+        if self.dm.runs and QMessageBox.question(
+                self, "가져오기", "현재 기록된 데이터가 닫힙니다(저장하지 않았다면 사라집니다). 계속할까요?"
+        ) != QMessageBox.Yes:
+            return
+        try:
+            res = capstone_import.load_cap(name)
+        except (ValueError, OSError) as e:
+            QMessageBox.critical(self, "가져오기 실패", str(e))
+            return
+        if not res.runs:
+            QMessageBox.information(self, "가져오기", "읽을 수 있는 측정 데이터가 없습니다."
+                                    + (f"\n(지원하지 않는 형식의 데이터 {res.skipped}개 건너뜀)" if res.skipped else ""))
+            return
+        keys = [k for r in res.runs[:1] for k in r.series][:2] or list(res.measurements)[:2]
+        displays = [{"kind": "그래프", "key": keys[0]}, {"kind": "테이블", "key": keys[0]}]
+        if len(keys) > 1:
+            displays.append({"kind": "그래프", "key": keys[1]})
+        self.dm.load(res.runs)
+        self.known = res.measurements
+        self.apply_layout({"pages": [{"name": Path(name).stem, "displays": displays}]})
+        self.path = None  # an import is a new, unsaved experiment
+        self.setWindowTitle(f"{Path(name).name} (가져옴) — OpenPASCO")
+        notes = (f", 지원하지 않는 데이터 {res.skipped}개 건너뜀" if res.skipped else "") + \
+                (f", 경고 {len(res.warnings)}건" if res.warnings else "")
+        self.statusBar().showMessage(
+            f"가져옴: 런 {len(res.runs)}개, 측정값 {len(res.measurements)}종{notes} (단위 정보는 가져오지 않음)")
 
     def export_csv(self):
         runs = self.dm.runs

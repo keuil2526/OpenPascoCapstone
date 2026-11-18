@@ -161,6 +161,7 @@ class GraphDisplay(QWidget):
             name, unit = f"d{name}/dt", f"{unit}/s"
         elif derived == "적분":
             name, unit = f"∫{name}dt", f"{unit}·s"
+        self.plot.getAxis("left").enableAutoSIPrefix(bool(unit))  # no "(x0.001)" for unitless data
         self.plot.setLabel("left", name, units=unit)
 
     def _analyze(self):
