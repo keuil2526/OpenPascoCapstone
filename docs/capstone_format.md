@@ -36,7 +36,7 @@ DataSource  LongName="Force"  (측정값 이름; BaseUnit/DefaultUnit = 숫자 �
 | 시작 시각 | 파일에서 검증된 시작 시각을 찾지 못해 파일 수정 시각을 사용 |
 | 페이지·디스플레이 | **부분 지원**: `WorkbookPage`(이름) > `WorkbookItem`(`CSLineGraph`/`CSDataTable`/`CSDataDigits`/`CSBarMeter`, 상대 `Position`)에서 종류와 읽는 순서만 가져온다. 디스플레이가 보여주는 측정값은 `BundleInput BundleMeasID`가 `DataSource EUID`와 같은 첫 항목으로 해석한다(샘플의 널이 아닌 링크 467개 전부 일치). 해석 실패 시 순서대로 배정. 축 범위·색·통계·피팅 설정·텍스트 상자·영상은 미지원 |
 | 계산식, 사용자 정의 변수, 이미지/영상 | 미분석 |
-| `.cap` 저장 | **부분 지원**: `Header`, `DataRepository`(시간 측정값 + `DataSource`/`DataSet`/저장소 요소), 빈 `Workspace`만 쓴다. 헤더 버전은 설치된 Capstone보다 낮은 2.6.0으로 쓴다(더 높으면 "newer version" 경고). Wine의 Capstone 2.10.8에서 경고 없이 열림을 확인했다. **측정값이 Capstone의 센서/데이터 요약 목록에는 나타나지 않는다** — 센서는 `Hardware > Interface > Channel > Sensor` 항목에 연결되는데 이를 만들지 않았기 때문이다. 간격이 일정하지 않은 시계열은 평균 간격으로 저장한다 |
+| `.cap` 저장 | **부분 지원**: `Header`, `DataRepository`(시간 측정값 + `DataSource`/`DataSet`/저장소 요소), 빈 `Workspace`만 쓴다. 헤더 버전은 설치된 Capstone보다 낮은 2.6.0으로 쓴다(더 높으면 "newer version" 경고). Wine의 Capstone 2.10.8에서 경고 없이 열림을 확인했다. Capstone의 센서/데이터 요약 목록은 `Hardware > Interface > Channel > Sensor` 항목과 `DataSource`의 `EUID` 일치로 만들어진다. **Capstone이 만든 파일을 열어 다시 저장하면** 원본 `Hardware` 요소와 `DataSource` 속성을 `openpasco.json`의 `origin`에 보관했다가 그대로 다시 써서, Wine의 Capstone 2.10.8 데이터 요약에 센서·측정값·단위·런 6개가 나타나는 것을 확인했다. **OpenPASCO에서 직접 기록한 가상/BLE 센서의 측정값은 PASCO 센서 ID가 없어 Hardware 항목을 만들지 않으므로 Capstone 센서 목록에는 나타나지 않는다**(지어낸 ID를 쓰지 않음). 간격이 일정하지 않은 시계열은 평균 간격으로 저장한다 |
 | `openpasco.json` | OpenPASCO 전용 ZIP 멤버(배치·계산·기록 조건, 원래 측정값 키·단위). Capstone이 무시하는 것을 확인했다. 파손되면 일반 `.cap`으로 연다 |
 
 ## 안전

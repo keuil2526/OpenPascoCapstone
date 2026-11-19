@@ -80,3 +80,24 @@ def test_csv_export(tmp_path):
     rows = list(csv.reader(open(p, encoding="utf-8-sig")))
     assert rows[0] == ["시간 (s:x) (s)", "위치 (m)", "시간 (s:z) (s)", "s:z"]
     assert rows[1] == ["0", "0", "0", "9"] and rows[3] == ["0.2", "4", "", ""]
+
+
+def test_capstone_origin_survives_resave(tmp_path):
+    """A file opened from Capstone keeps its Hardware section and DataSource attributes when re-saved."""
+    import zipfile
+    from tests.test_capstone_import import make_cap
+    src = make_cap(tmp_path / "orig.cap")
+    with zipfile.ZipFile(src) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    files["main.xml"] = files["main.xml"].replace(
+        b'<DataSource EUID="{F1}"', b'<Hardware><Interface Type="1"/></Hardware><DataSource EUID="{F1}"', 1)
+    with zipfile.ZipFile(src, "w") as z:
+        for n, v in files.items():
+            z.writestr(n, v)
+    res = load_cap(src)
+    assert "<Interface" in res.origin["hardware"] and res.origin["attrs"]["cap:Force"]["EUID"] == "{F1}"
+    save_cap(tmp_path / "out.cap", res.runs, res.measurements, {}, res.origin)
+    again = load_cap(tmp_path / "out.cap")
+    assert "<Interface" in again.origin["hardware"] and again.origin["attrs"]["cap:Force"]["EUID"] == "{F1}"
+    with zipfile.ZipFile(tmp_path / "out.cap") as z:
+        assert b'EUID="{F1}"' in z.read("main.xml") and b"<Hardware" in z.read("main.xml")

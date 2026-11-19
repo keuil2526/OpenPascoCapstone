@@ -416,6 +416,7 @@ class MainWindow(QMainWindow):
         if not self.confirm_discard("새 실험"):
             return
         self.dm.clear()
+        self.cap_origin = {}
         self.conditions = Conditions()
         self.known.clear()
         self.path = self.doc_name = None
@@ -484,7 +485,7 @@ class MainWindow(QMainWindow):
         used = {k for r in self.dm.runs for k in r.series}
         meas = {k: v for k, v in self._all_measurements().items() if k in used}
         try:
-            warnings = capstone_export.save_cap(path, self.dm.runs, meas, self.layout_state())
+            warnings = capstone_export.save_cap(path, self.dm.runs, meas, self.layout_state(), self.cap_origin)
         except (OSError, TypeError) as e:
             QMessageBox.critical(self, "저장 실패", str(e))
             return
@@ -520,6 +521,7 @@ class MainWindow(QMainWindow):
             return
         self.dm.load(res.runs)
         self.known = res.measurements
+        self.cap_origin = res.origin
         skipped = 0
         if own:
             layout = res.layout

@@ -39,14 +39,20 @@ def _interval(t: np.ndarray):
 EXTRA = "openpasco.json"  # our own ZIP member: layout, calculations, original keys (Capstone ignores it)
 
 
-def build(runs: list[Run], measurements: dict[str, tuple[str, Measurement]], layout: dict | None = None):
+def build(runs: list[Run], measurements: dict[str, tuple[str, Measurement]], layout: dict | None = None,
+          origin: dict | None = None):
     """Return (main.xml bytes, {member name: data bytes}, warnings)."""
-    sources = []
-    warnings: list[str] = []
+    sources, warnings = [], []
     files: dict[str, bytes] = {}
     root = ET.Element("DSProExperiment")
     ET.SubElement(root, "Header", Version=VERSION, ArgumentSeparator=",", LanguageID="409", Language="enu",
                   DigitCharacters="", ImportedFileName="", DecimalSeparator=".")
+    origin = origin or {}
+    try:  # the Hardware section of a file that came from Capstone: it is what lists sensors in Capstone
+        if origin.get("hardware"):
+            root.append(ET.fromstring(origin["hardware"]))
+    except ET.ParseError:
+        warnings.append("하드웨어 정보를 읽을 수 없어 건너뜀")
     repo = ET.SubElement(root, "DataRepository")
     ET.SubElement(repo, "MasterTimeMeasurement", LongName="Time", MeasurementName="Time", SymbolName="t",
                   BaseUnit="256", DefaultUnit="256", EUID=_id(), Visible="TRUE", GenericType="1")
@@ -55,10 +61,14 @@ def build(runs: list[Run], measurements: dict[str, tuple[str, Measurement]], lay
     for key, (sensor, m) in measurements.items():
         sources.append({"key": key, "sensor": sensor, "name": m.name, "unit": m.unit,
                         "minimum": m.minimum, "maximum": m.maximum})
-        src = ET.SubElement(repo, "DataSource", LongName=m.name, ShortName=m.name, MeasurementName=m.name,
-                            EUID=_id(), Visible="TRUE", DataMeasSourceType="1000", MeasurementIsVirtual="FALSE",
-                            BaseUnit=UNIT_CODES.get(m.unit, "0"), DefaultUnit=UNIT_CODES.get(m.unit, "0"),
-                            DefaultMinimumDisplayValue=repr(m.minimum), DefaultMaximumDisplayValue=repr(m.maximum))
+        kept = origin.get("attrs", {}).get(key)  # original attributes (EUID links it to the Hardware section)
+        if isinstance(kept, dict) and all(isinstance(v, str) for v in kept.values()):
+            src = ET.SubElement(repo, "DataSource", kept)
+        else:
+            src = ET.SubElement(repo, "DataSource", LongName=m.name, ShortName=m.name, MeasurementName=m.name,
+                                EUID=_id(), Visible="TRUE", DataMeasSourceType="1000", MeasurementIsVirtual="FALSE",
+                                BaseUnit=UNIT_CODES.get(m.unit, "0"), DefaultUnit=UNIT_CODES.get(m.unit, "0"),
+                                DefaultMinimumDisplayValue=repr(m.minimum), DefaultMaximumDisplayValue=repr(m.maximum))
         for r in runs:
             s = r.series.get(key)
             if s is None:
@@ -86,14 +96,14 @@ def build(runs: list[Run], measurements: dict[str, tuple[str, Measurement]], lay
     wb = ET.SubElement(ws, "Workbook", CurrentPage="0", PageFormat="5")
     ET.SubElement(wb, "WorkbookPage", Name="Page #1", PageID="1", EUID=_id())
     ET.indent(root)
-    files[EXTRA] = json.dumps({"version": 1, "sources": sources, "layout": layout or {}},
+    files[EXTRA] = json.dumps({"version": 1, "sources": sources, "layout": layout or {}, "origin": origin},
                               ensure_ascii=False).encode()
     return ET.tostring(root, encoding="utf-8", xml_declaration=False), files, warnings
 
 
-def save_cap(path, runs: list[Run], measurements, layout: dict | None = None) -> list[str]:
+def save_cap(path, runs: list[Run], measurements, layout: dict | None = None, origin: dict | None = None) -> list[str]:
     """Write path atomically; returns warnings about data that could not be stored exactly."""
-    xml, files, warnings = build(runs, measurements, layout)
+    xml, files, warnings = build(runs, measurements, layout, origin)
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:

@@ -44,6 +44,7 @@ class ImportResult:
     warnings: list[str] = field(default_factory=list)
     pages: list[tuple[str, list[tuple[str, str | None]]]] = field(default_factory=list)  # (page name, display kinds)
     layout: dict | None = None  # present only in files written by OpenPASCO (member openpasco.json)
+    origin: dict = field(default_factory=dict)  # {"hardware": <Hardware xml>, "attrs": {key: DataSource attributes}}
 
 
 DISPLAY_TAGS = {"CSLineGraph": "그래프", "CSDataTable": "테이블", "CSDataDigits": "숫자", "CSBarMeter": "미터"}
@@ -111,6 +112,15 @@ def _read_extra(z: zipfile.ZipFile) -> dict | None:
     return None
 
 
+MAX_HARDWARE_CHARS = 1_000_000
+
+
+def _saved_origin(extra) -> dict:
+    """Capstone details carried through OpenPASCO files so that re-saving keeps sensors visible in Capstone."""
+    o = (extra or {}).get("origin")
+    return o if isinstance(o, dict) else {}
+
+
 def _saved_source(extra, i: int) -> dict:
     """Text fields of the i-th source from openpasco.json, or {} (then names come from the XML)."""
     try:
@@ -135,6 +145,7 @@ def load_cap(path) -> ImportResult:
     runs: dict[int, Run] = {}
     meas: dict[str, tuple[str, Measurement]] = {}
     euid_key: dict[str, str] = {}
+    attrs: dict[str, dict] = {}
     sidx = 0  # position among named sources: our writer emits them in the order of extra['sources']
     result = ImportResult([], meas)
     with z:
@@ -151,6 +162,7 @@ def load_cap(path) -> ImportResult:
             lo, hi = np.inf, -np.inf
             if src.get("EUID"):
                 euid_key[src.get("EUID")] = key
+            attrs[key] = dict(src.attrib)
             # code is trusted only when the display unit equals the base unit
             unit = UNITS.get(src.get("BaseUnit"), "") if src.get("BaseUnit") == src.get("DefaultUnit") else ""
             unit = saved.get("unit", unit)  # our own file knows the exact unit text
@@ -190,4 +202,12 @@ def load_cap(path) -> ImportResult:
     result.runs = [runs[n] for n in sorted(runs)]
     result.pages = _pages(root, euid_key)
     result.layout = extra["layout"] if extra else None
+    hw = root.find("Hardware")
+    hardware = ET.tostring(hw, encoding="unicode") if hw is not None else ""
+    saved = _saved_origin(extra)
+    if len(hardware) > MAX_HARDWARE_CHARS:
+        hardware = ""
+    result.origin = {"hardware": hardware or saved.get("hardware", ""),
+                     "attrs": {k: v for k, v in {**saved.get("attrs", {}), **{k: a for k, a in attrs.items() if k in meas}}.items()
+                               if isinstance(v, dict)}}
     return result
