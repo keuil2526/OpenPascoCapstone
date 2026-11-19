@@ -438,10 +438,42 @@ class FftDisplay(pg.PlotWidget):
         self.curve.setData(*(spec if spec else ([], [])))
 
 
+class HistogramDisplay(pg.PlotWidget):
+    """Distribution of the newest run's values (equal-width bins, Sturges' rule)."""
+
+    def __init__(self):
+        super().__init__()
+        style_plot(self)
+        self.setLabel("left", "개수")
+        self.bars = pg.BarGraphItem(x=[], height=[], width=1, brush="#1f2bff")
+        self.addItem(self.bars)
+
+    @staticmethod
+    def bins(y):
+        """(bin centres, counts, bin width) or None for empty data."""
+        y = np.asarray(y, float)
+        y = y[np.isfinite(y)]
+        if len(y) == 0:
+            return None
+        counts, edges = np.histogram(y, bins=int(np.ceil(np.log2(len(y)))) + 1)
+        width = edges[1] - edges[0]
+        return (edges[:-1] + edges[1:]) / 2, counts, width
+
+    def show(self, meas, data):
+        h = None if data is None else self.bins(data[1])
+        if h is None:
+            self.bars.setOpts(x=[], height=[])
+            return
+        x, counts, width = h
+        self.bars.setOpts(x=x, height=counts, width=width * 0.9)
+        self.setLabel("bottom", meas.label if meas else "")
+
+
 DISPLAY_TYPES = {
     "그래프": GraphDisplay,
     "테이블": TableDisplay,
     "숫자": DigitsDisplay,
     "미터": MeterDisplay,
     "FFT": FftDisplay,
+    "히스토그램": HistogramDisplay,
 }

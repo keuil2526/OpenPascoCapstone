@@ -39,6 +39,15 @@ def fft(p):
         p.drawLine(x, 34, x, 34 - h)
 
 
+def histogram(p):
+    p.setPen(_pen("#cfd8dc", 2))
+    p.drawLine(7, 34, 35, 34)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#ef5350"))
+    for x, h in ((9, 8), (15, 18), (21, 26), (27, 12)):
+        p.drawRect(QRectF(x, 34 - h, 5, h))
+
+
 def table(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawRect(QRectF(5, 7, 30, 26))
@@ -182,7 +191,7 @@ def add_page(p):
     p.drawLine(33, 19, 33, 29)
 
 
-_DRAW = {f.__name__: f for f in (graph, fft, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
+_DRAW = {f.__name__: f for f in (graph, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
 def icon(name: str) -> QIcon:

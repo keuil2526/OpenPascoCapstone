@@ -634,3 +634,10 @@ def test_fft_finds_sine_frequency():
     f, a = FftDisplay.spectrum(t, 3 * np.sin(2 * np.pi * 5 * t) + 10)
     assert abs(f[np.argmax(a)] - 5) < 0.5 and abs(a.max() - 3) < 0.3
     assert FftDisplay.spectrum([0, 1], [1, 2]) is None
+
+
+def test_histogram_bins_cover_all_values():
+    from openpasco.gui.widgets.displays import HistogramDisplay
+    x, counts, w = HistogramDisplay.bins([1, 2, 2, 3, 3, 3, 4, 10])
+    assert counts.sum() == 8 and w > 0
+    assert HistogramDisplay.bins([]) is None
