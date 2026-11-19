@@ -32,20 +32,34 @@ SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 GRID_COLUMNS = 2
 DISPLAY_MIME = "application/x-openpasco-display"
 
-def dark_palette() -> QPalette:
+def _palette(colors: dict, disabled: str) -> QPalette:
     pal = QPalette()
-    for role, color in {
+    for role, color in colors.items():
+        pal.setColor(role, QColor(color))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        pal.setColor(QPalette.Disabled, role, QColor(disabled))
+    return pal
+
+
+def dark_palette() -> QPalette:
+    return _palette({
         QPalette.Window: "#2b2b2b", QPalette.WindowText: "#e0e0e0",
         QPalette.Base: "#1e1e1e", QPalette.AlternateBase: "#2b2b2b",
         QPalette.Text: "#e0e0e0", QPalette.Button: "#353535", QPalette.ButtonText: "#e0e0e0",
         QPalette.ToolTipBase: "#353535", QPalette.ToolTipText: "#e0e0e0",
         QPalette.Highlight: "#2a82da", QPalette.HighlightedText: "#ffffff",
-        QPalette.Link: "#5aa9f0", QPalette.PlaceholderText: "#808080",
-    }.items():
-        pal.setColor(role, QColor(color))
-    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
-        pal.setColor(QPalette.Disabled, role, QColor("#707070"))
-    return pal
+        QPalette.Link: "#5aa9f0", QPalette.PlaceholderText: "#808080"}, "#707070")
+
+
+def light_palette() -> QPalette:
+    """Explicit, so a dark desktop theme cannot turn the graph and dialogs dark (Capstone's graph is white)."""
+    return _palette({
+        QPalette.Window: "#f0f0f0", QPalette.WindowText: "#222222",
+        QPalette.Base: "#ffffff", QPalette.AlternateBase: "#f3f3f3",
+        QPalette.Text: "#222222", QPalette.Button: "#e8e8e8", QPalette.ButtonText: "#222222",
+        QPalette.ToolTipBase: "#ffffdc", QPalette.ToolTipText: "#222222",
+        QPalette.Highlight: "#2a82da", QPalette.HighlightedText: "#ffffff",
+        QPalette.Link: "#1565c0", QPalette.PlaceholderText: "#888888"}, "#a0a0a0")
 
 
 class DisplayPalette(QListWidget):
@@ -493,6 +507,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(s.value("geometry"))
         if s.value("windowState"):
             self.restoreState(s.value("windowState"))
+        self.set_dark(s.value("dark", False, type=bool))  # sets the palette even when off
         self.act_dark.setChecked(s.value("dark", False, type=bool))
         self.act_white.setChecked(s.value("white", False, type=bool) and not self.act_dark.isChecked())
 
@@ -507,7 +522,7 @@ class MainWindow(QMainWindow):
         if on:
             self.act_white.setChecked(False)
         app = QApplication.instance()
-        app.setPalette(dark_palette() if on else app.style().standardPalette())
+        app.setPalette(dark_palette() if on else light_palette())
         for plot in self.findChildren(pg.PlotWidget):
             style_plot(plot)
         QSettings().setValue("dark", on)

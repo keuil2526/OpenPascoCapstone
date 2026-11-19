@@ -111,6 +111,8 @@ def style_plot(plot: pg.PlotWidget):
         axis.setPen(fg)
         axis.setTextPen(fg)
         axis.setStyle(tickFont=QFont("sans-serif", 11))
+    if plot.plotItem.legend is not None:
+        plot.plotItem.legend.setLabelTextColor(fg)
 
 
 class GraphDisplay(QWidget):
@@ -144,6 +146,7 @@ class GraphDisplay(QWidget):
         self.plot.addItem(self.region)
 
         self.legend = self.plot.addLegend(offset=(-10, 10))
+        style_plot(self.plot)  # the legend text follows the palette too
         self.older: list[pg.PlotDataItem] = []
         self.older_names: list[str] | None = None
         def toggle(icon_name, tip):  # icon toggle like Capstone's graph toolbar
