@@ -641,3 +641,9 @@ def test_histogram_bins_cover_all_values():
     x, counts, w = HistogramDisplay.bins([1, 2, 2, 3, 3, 3, 4, 10])
     assert counts.sum() == 8 and w > 0
     assert HistogramDisplay.bins([]) is None
+
+
+def test_bar_meter_fraction():
+    from openpasco.gui.widgets.displays import BarMeterDisplay as B
+    assert B.fraction(5, 0, 10) == 0.5 and B.fraction(99, 0, 10) == 1 and B.fraction(None, 0, 10) == 0
+    assert B.fraction(1, 5, 5) == 0

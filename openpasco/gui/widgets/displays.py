@@ -413,6 +413,44 @@ class MeterDisplay(Meter):
         self.set_value(None if data is None or len(data[1]) == 0 else float(data[1][-1]))
 
 
+class BarMeterDisplay(QWidget):
+    """Vertical bar filled in proportion to the latest value between the sensor's range limits."""
+
+    def __init__(self):
+        super().__init__()
+        self.minimum, self.maximum, self.unit, self.value = 0.0, 10.0, "", None
+
+    @staticmethod
+    def fraction(value, minimum, maximum):
+        if value is None or maximum <= minimum:
+            return 0.0
+        return min(1.0, max(0.0, (value - minimum) / (maximum - minimum)))
+
+    def show(self, meas, data):
+        if meas:
+            self.minimum, self.maximum, self.unit = meas.minimum, meas.maximum, meas.unit
+        self.value = None if data is None or len(data[1]) == 0 else float(data[1][-1])
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        pal = self.palette()
+        w, h = self.width(), self.height()
+        bar = QRectF(w / 2 - 25, 20, 50, h - 60)
+        p.setPen(QPen(pal.color(QPalette.Text), 1))
+        p.setBrush(pal.color(QPalette.Base))
+        p.drawRect(bar)
+        f = self.fraction(self.value, self.minimum, self.maximum)
+        p.setBrush(QColor("#1f2bff"))
+        p.setPen(Qt.NoPen)
+        p.drawRect(QRectF(bar.left(), bar.bottom() - f * bar.height(), bar.width(), f * bar.height()))
+        p.setPen(pal.color(QPalette.Text))
+        p.drawText(QRectF(0, h - 36, w, 30), Qt.AlignCenter,
+                   "— — —" if self.value is None else f"{self.value:.4g} {self.unit}")
+        p.drawText(QRectF(bar.right() + 6, bar.top() - 8, 80, 16), Qt.AlignLeft, f"{self.maximum:g}")
+        p.drawText(QRectF(bar.right() + 6, bar.bottom() - 8, 80, 16), Qt.AlignLeft, f"{self.minimum:g}")
+
+
 class FftDisplay(pg.PlotWidget):
     """Amplitude spectrum of the newest run. Assumes even sampling (mean interval); the DC part is removed."""
 
@@ -474,6 +512,7 @@ DISPLAY_TYPES = {
     "테이블": TableDisplay,
     "숫자": DigitsDisplay,
     "미터": MeterDisplay,
+    "막대 미터": BarMeterDisplay,
     "FFT": FftDisplay,
     "히스토그램": HistogramDisplay,
 }
