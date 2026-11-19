@@ -682,7 +682,7 @@ def test_graph_auto_analysis_shows_summary_fit_and_peaks(win):
     t = np.linspace(0, 10, 400)
     g = _graph_with_data(win, t, 3 * np.sin(2 * np.pi * 0.5 * t))
     _pick(g, "자동 분석")
-    assert "사인" in g.result.text() and "봉우리" in g.result.text()
+    assert "사인" not in g.result.text() and "봉우리" in g.result.text()
     assert len(g.overlay.getData()[0]) == 400
     assert len(g.marks.items) > 5  # band, Max/Mean/Min labels, fit label, peak callouts
     _pick(g, "분석 없음")

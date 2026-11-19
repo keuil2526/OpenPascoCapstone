@@ -57,11 +57,11 @@ def test_auto_analyze_picks_linear_for_a_line():
     assert a.fit.name == "선형" and a.trend == "증가" and a.peaks == []
 
 
-def test_auto_analyze_finds_sine_and_peaks():
+def test_auto_analyze_finds_peaks_but_never_suggests_a_sine():
     from openpasco.analysis.numeric import auto_analyze
     t = np.linspace(0, 10, 400)
     a = auto_analyze(t, 3 * np.sin(2 * np.pi * 0.5 * t))
-    assert a.fit.name == "사인" and len(a.peaks) == 5 and a.trend == "일정"
+    assert a.fit.name != "사인" and len(a.peaks) == 5 and a.trend == "일정"
 
 
 def test_auto_analyze_few_points_does_not_crash():

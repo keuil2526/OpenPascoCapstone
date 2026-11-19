@@ -134,6 +134,8 @@ def auto_analyze(t, y) -> Auto:
     st = statistics(t, y)
     best = None
     for name, (_, names, _) in MODELS.items():
+        if name == "사인":
+            continue  # automatic analysis does not suggest a sine fit (still available by hand)
         try:
             f = fit(name, t, y)
         except ValueError:
