@@ -557,7 +557,7 @@ class MainWindow(QMainWindow):
         return {"rate_index": self.rate_combo.currentIndex(), "conditions": asdict(self.conditions),
                 "calcs": [asdict(c) for c in self.dm.calcs.values()], "pages": [
             {"name": self.pages.tabText(i),
-             "displays": [{"kind": f.kind, "key": f.key, **({"title": f.body.title_edit.text(), "notes": f.body.notes} if hasattr(f.body, "title_edit") else {})}
+             "displays": [{"kind": f.kind, "key": f.key, **({"title": f.body.title_edit.text(), "notes": f.body.notes, "x_key": f.x_key} if hasattr(f.body, "title_edit") else {})}
                           for f in self.pages.widget(i).displays]}
             for i in range(self.pages.count())]}
 
@@ -577,6 +577,8 @@ class MainWindow(QMainWindow):
                 idx = frame.selector.findData(d["key"])
                 if idx >= 0:
                     frame.selector.setCurrentIndex(idx)
+                if hasattr(frame.body, "set_x") and isinstance(d.get("x_key"), str):
+                    frame.set_x_key(d["x_key"])
                 frame.refresh(self.dm)
         self.pages.setCurrentIndex(0)
         self.conditions = self._conditions_from(layout.get("conditions"))

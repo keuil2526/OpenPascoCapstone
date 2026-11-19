@@ -8,9 +8,9 @@ import math
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
+from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QTableView, QToolButton,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu, QTableView, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -33,6 +33,9 @@ class DisplayFrame(QFrame):
         self.kind = title
         self._older_sig = None
         self._dm = None
+        self.x_key: str | None = None  # graph x axis; None = time
+        if hasattr(body, "axis_clicked"):
+            body.axis_clicked.connect(self._choose_axis)
         if hasattr(body, "older_toggled"):
             body.older_toggled.connect(self._older_toggled)
         self.measurements: dict[str, Measurement] = {}
@@ -78,7 +81,32 @@ class DisplayFrame(QFrame):
         idx = self.selector.findData(keep)
         self.selector.setCurrentIndex(idx if idx >= 0 else (0 if items else -1))
         self.selector.blockSignals(False)
+        if self.x_key and self.x_key not in self.measurements and hasattr(self.body, "set_x"):
+            self.x_key = None  # the x measurement is gone
+            self.body.set_x(None)
         self.body.show(self.measurement, None)
+
+    def _choose_axis(self, side):
+        """Capstone: click an axis of the graph to pick what it shows."""
+        menu = QMenu(self)
+        if side == "bottom":
+            menu.addAction("시간").setData(None)
+        for k in self.measurements:
+            menu.addAction(self.selector.itemText(self.selector.findData(k))).setData(k)
+        act = menu.exec(QCursor.pos())
+        if act is None:
+            return
+        if side == "left":
+            self.selector.setCurrentIndex(self.selector.findData(act.data()))
+        else:
+            self.set_x_key(act.data())
+
+    def set_x_key(self, key):
+        self.x_key = key if key in self.measurements else None
+        self.body.set_x(self.measurements.get(self.x_key))
+        self._older_sig = None
+        if self._dm is not None:
+            self.refresh(self._dm)
 
     def _older_toggled(self):
         self._older_sig = None
@@ -89,7 +117,11 @@ class DisplayFrame(QFrame):
         self._dm = data_manager
         if self.key is None:
             return
-        self.body.show(self.measurement, data_manager.latest(self.key))
+        data = data_manager.latest(self.key)
+        if self.x_key and data is not None and len(data[0]):
+            xs = data_manager.latest(self.x_key)  # the x measurement, matched to y's sample times
+            data = (np.interp(data[0], *xs), data[1]) if xs is not None and len(xs[0]) else None
+        self.body.show(self.measurement, data)
         if getattr(self.body, "wants_older", False):
             # older runs never change while recording: refetch only when the run set or selection changes
             sig = (self.key, tuple(id(r) for r in data_manager.runs))
@@ -120,6 +152,7 @@ class GraphDisplay(QWidget):
 
     older_toggled = Signal()  # DisplayFrame reacts by refetching data
     title_changed = Signal()
+    axis_clicked = Signal(str)  # "left" / "bottom": the user clicked that axis to choose its measurement
     ANALYSES = ["분석 없음", "자동 분석", "통계", "넓이", *MODELS, "미분", "적분"]
     DEBOUNCE_MS = 400  # analysis runs at most this often while data streams in
 
@@ -182,7 +215,13 @@ class GraphDisplay(QWidget):
         layout.addWidget(self.result)
 
         self.meas: Measurement | None = None
+        self.x_meas: Measurement | None = None  # None = time on the x axis
         self.data = None
+        for side in ("left", "bottom"):
+            ax = self.plot.getAxis(side)
+            ax.setToolTip("클릭해서 측정값 선택")
+            ax.mouseClickEvent = lambda ev, side=side: (ev.accept(), self.axis_clicked.emit(side))[1] \
+                if ev.button() == Qt.LeftButton else ev.ignore()
         self.timer = QTimer(self, singleShot=True, interval=self.DEBOUNCE_MS, timeout=self._analyze)
         self.range_check.toggled.connect(self._range_toggled)
         self.older_check.toggled.connect(lambda _: self.older_toggled.emit())
@@ -202,7 +241,21 @@ class GraphDisplay(QWidget):
 
     @property
     def wants_older(self) -> bool:
-        return self.older_check.isChecked()
+        return self.older_check.isChecked() and self.x_meas is None  # older runs are drawn against time only
+
+    def _xname(self):
+        return self.x_meas.name if self.x_meas else "시간"
+
+    def _xunit(self):
+        return self.x_meas.unit if self.x_meas else "s"
+
+    def set_x(self, meas):
+        self.x_meas = meas
+        self.plot.setLabel("bottom", self._xname(), units=self._xunit())
+        for item in self.older:
+            self.plot.removeItem(item)
+        self.older = []
+        self.older_names = None
 
     def show_older(self, runs):
         """runs: [(run number, t, y)] drawn faded behind the newest run (analysis uses the newest only)."""
@@ -272,10 +325,11 @@ class GraphDisplay(QWidget):
         if self.meas is None:
             return
         name, unit = self.meas.name, self.meas.unit
+        xs = "t" if self.x_meas is None else self._xname()
         if derived == "미분":
-            name, unit = f"d{name}/dt", f"{unit}/s"
+            name, unit = f"d{name}/d{xs}", f"{unit}/{self._xunit()}"
         elif derived == "적분":
-            name, unit = f"∫{name}dt", f"{unit}·s"
+            name, unit = f"∫{name}d{xs}", f"{unit}·{self._xunit()}"
         self._plain_axis()
         self.plot.setLabel("left", name, units=unit)
 
@@ -301,7 +355,7 @@ class GraphDisplay(QWidget):
         self.marks.area(t, y)
         mid = len(t) // 2
         point = (float(t[mid]), float(y[mid]))
-        unit = f"{self._unit()}·s" if self._unit() else "s"
+        unit = f"{self._unit()}·{self._xunit()}" if self._unit() else self._xunit()
         self.marks.callout(f"Area: {area:.4g} {unit}", point, box_position(self._view(), point))
         return area
 
@@ -336,7 +390,7 @@ class GraphDisplay(QWidget):
                     top = self._view()[1][1]
                     self.marks.label(a.fit.summary(), float(t[0]), top, anchor=(0, 0))
                 for px, py in a.peaks[:3]:
-                    self.marks.callout(f"{px:.4g} s, {py:.4g} {self._unit()}", (px, py),
+                    self.marks.callout(f"{px:.4g} {self._xunit()}, {py:.4g} {self._unit()}", (px, py),
                                        box_position(self._view(), (px, py)))
                 self.result.setText(a.summary())
             elif mode == "통계":
@@ -369,9 +423,7 @@ class GraphDisplay(QWidget):
     def place_at(self, x: float):
         """Coordinate tool / text box at the data point nearest to time x."""
         t, y = self.data
-        i = int(np.clip(np.searchsorted(t, x), 0, len(t) - 1))
-        if i > 0 and abs(t[i - 1] - x) < abs(t[i] - x):
-            i -= 1
+        i = int(np.argmin(np.abs(t - x)))  # nearest point (x need not be sorted when it is not time)
         if self.coord_check.isChecked():
             self.coord_point = (float(t[i]), float(y[i]))
         elif self.note_check.isChecked():
@@ -406,10 +458,10 @@ class GraphDisplay(QWidget):
         if self.coord_point:
             px, py = self.coord_point
             self.user_marks.crosshair(px, py)
-            self.user_marks.callout(f"{px:.4g} s, {py:.4g} {self._unit()}", (px, py),
+            self.user_marks.callout(f"{px:.4g} {self._xunit()}, {py:.4g} {self._unit()}", (px, py),
                                     box_position(self._view(), (px, py)))
         for n in self.notes:
-            i = int(np.clip(np.searchsorted(t, n["x"]), 0, len(t) - 1))
+            i = int(np.argmin(np.abs(t - n["x"])))
             point = (float(t[i]), float(y[i]))
             box = (n["bx"], n["by"]) if "bx" in n else box_position(self._view(), point, dx=0.04, dy=0.2)
             self.user_marks.callout(n["text"], point, box, on_move=lambda bx, by, n=n: self.move_note(n, bx, by))

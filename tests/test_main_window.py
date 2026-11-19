@@ -802,3 +802,28 @@ def test_white_mode_switches_chrome_icons_and_excludes_dark(win):
     assert win.styleSheet() == CHROME_QSS_LIGHT and icons.LIGHT
     win.act_dark.setChecked(True)  # dark and white exclude each other
     assert not win.act_white.isChecked() and win.styleSheet() == CHROME_QSS and not icons.LIGHT
+
+
+def test_graph_x_axis_can_be_another_measurement(win):
+    import numpy as np
+    from openpasco.gui.widgets.displays import DISPLAY_TYPES, DisplayFrame
+    from openpasco.hardware.base import Measurement
+    t = np.linspace(0, 10, 11)
+    series = {"a": (t, t * 2.0), "b": (t, t ** 2)}
+
+    class DM:
+        runs = []
+        def latest(self, key): return series[key]
+        def older_runs(self, key): return []
+
+    f = DisplayFrame("그래프", DISPLAY_TYPES["그래프"]())
+    f.set_measurements({"a": ("S", Measurement("a", "위치", "m", 0, 1)), "b": ("S", Measurement("b", "속도", "m/s", 0, 1))})
+    f.refresh(DM())
+    assert f.body.data[0][3] == 3.0 and f.body.plot.getAxis("bottom").labelText == "시간"
+    f.set_x_key("b")  # x = b, y = a (as the axis menu would do)
+    assert list(f.body.data[0]) == list(t ** 2) and list(f.body.data[1]) == list(2 * t)
+    assert f.body.plot.getAxis("bottom").labelText == "속도" and not f.body.wants_older
+    f.body.axis_clicked.connect(lambda side: None)
+    f.body.place_at(f.body.data[0][5])  # nearest-point lookup works for an unsorted/non-time x
+    f.set_x_key(None)
+    assert f.body.data[0][3] == 3.0 and f.body.plot.getAxis("bottom").labelText == "시간"
