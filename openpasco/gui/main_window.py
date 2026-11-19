@@ -137,6 +137,23 @@ class Page(QWidget):
         root.setVisible(bool(self.displays))
 
 
+def dock_title(dock: QDockWidget) -> QWidget:
+    """Capstone-style panel title: small bold name, close button on the right, dotted grip underneath."""
+    box = QWidget(objectName="dock_title")
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(6, 3, 4, 0)
+    lay.setSpacing(0)
+    top = QHBoxLayout()
+    top.setContentsMargins(0, 0, 0, 0)
+    top.addWidget(QLabel(dock.windowTitle()), 1)
+    close = QToolButton(text="✕", autoRaise=True, toolTip="닫기 (보기 메뉴에서 다시 열기)", objectName="dock_close")
+    close.clicked.connect(dock.close)
+    top.addWidget(close)
+    lay.addLayout(top)
+    lay.addWidget(QLabel("· ·", objectName="dock_grip"))
+    return box
+
+
 class TimedStatusBar(QStatusBar):
     """Capstone has no permanent status text; messages fade after a few seconds."""
     def showMessage(self, text, ms=8000):
@@ -356,6 +373,7 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("도구", self, objectName="tool_dock")
         dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
         dock.setWidget(left)
+        dock.setTitleBarWidget(dock_title(dock))
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
         self.view_menu.addAction(dock.toggleViewAction())
 
@@ -365,6 +383,7 @@ class MainWindow(QMainWindow):
         right = QDockWidget("디스플레이", self, objectName="display_dock")
         right.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetClosable)
         right.setWidget(self.display_list)
+        right.setTitleBarWidget(dock_title(right))
         self.addDockWidget(Qt.RightDockWidgetArea, right)
         self.view_menu.addAction(right.toggleViewAction())
 
@@ -377,7 +396,7 @@ class MainWindow(QMainWindow):
         bar = QToolBar("측정 제어", movable=False, objectName="control_bar")
         container = QWidget(objectName="control_row")
         row = QHBoxLayout(container)
-        row.setContentsMargins(10, 2, 10, 2)
+        row.setContentsMargins(10, 0, 10, 0)
         row.setSpacing(10)
 
         def button(name, text, icon_name, slot, tip):

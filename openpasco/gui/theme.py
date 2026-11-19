@@ -15,10 +15,14 @@ QMenu::separator { height: 1px; background: #444444; margin: 3px 6px; }
 QToolBar#main_toolbar { background: #676767; border: none; border-top: 1px solid #555555; spacing: 6px; padding: 0 4px; }
 QToolBar#main_toolbar QToolButton { color: #ffffff; padding: 1px 4px; border-radius: 3px; }
 QToolBar#main_toolbar QToolButton:hover { background: #8f8f8f; }
-QToolBar#control_bar { background: #666666; border: none; border-top: 1px solid #3a3a3a; padding: 3px; }
+QToolBar#control_bar { background: #666666; border: none; border-top: 1px solid #3a3a3a; padding: 1px; }
 QFrame#ctl_group { background: #5b5b5b; border: 1px solid #525252; border-radius: 8px; }
 QFrame#ctl_group QLabel, QFrame#ctl_group QToolButton { background: transparent; }
 QDockWidget { color: #ffffff; font-weight: bold; font-size: 11px; }
+QWidget#dock_title QLabel { color: #ffffff; font-weight: bold; font-size: 10px; background: transparent; }
+QLabel#dock_grip { color: #bbbbbb; font-size: 8px; }
+QToolButton#dock_close { color: #ffffff; font-size: 11px; padding: 0 3px; }
+QToolButton#dock_close:hover { background: #8f8f8f; }
 QDockWidget::title { background: #666666; padding: 4px 6px; }
 QWidget#palette, QWidget#hw_panel { background: #666666; }
 QWidget#hw_panel QLabel#panel_title { background: #5a5a5a; color: #ffffff; font-size: 15px; padding: 7px 10px; }
@@ -55,7 +59,7 @@ QToolButton#start_button:hover { background: #e6edf7; border-color: #7aa7e0; }
 QToolButton#start_card:hover { background: #e6edf7; border-color: #7aa7e0; }
 QLineEdit#graph_title { background: transparent; border: none; color: #333333; padding: 2px 6px; }
 QLabel#timer { background: #2e2e2e; color: #ffffff; border: 1px solid #8b8b8b; border-radius: 6px; padding: 2px 16px;
-               font-family: monospace; font-size: 26px; font-weight: bold; }
+               font-family: monospace; font-size: 20px; font-weight: bold; }
 QLabel#timer[recording="true"] { color: #ff6b6b; }
 QStatusBar { background: #666666; color: #eeeeee; max-height: 18px; }
 QStatusBar::item { border: none; }

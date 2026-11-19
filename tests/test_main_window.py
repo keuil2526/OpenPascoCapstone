@@ -654,3 +654,13 @@ def test_copy_page_image_puts_pixmap_on_clipboard(win):
     QApplication.clipboard().clear()
     win.act_copy_page.trigger()
     assert not QApplication.clipboard().pixmap().isNull()
+
+
+def test_dock_close_button_hides_and_view_menu_restores(win):
+    from PySide6.QtWidgets import QDockWidget, QToolButton
+    dock = win.findChild(QDockWidget, "tool_dock")
+    win.show()
+    dock.titleBarWidget().findChild(QToolButton, "dock_close").click()
+    assert not dock.isVisible()
+    dock.toggleViewAction().trigger()
+    assert dock.isVisible()
