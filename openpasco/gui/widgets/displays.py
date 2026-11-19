@@ -133,6 +133,7 @@ class GraphDisplay(QWidget):
         for angle in (0, 90):  # Capstone draws the x=0 / y=0 axes as dark lines
             self.plot.addItem(pg.InfiniteLine(angle=angle, pos=0, pen=pg.mkPen("#808080", width=1)), ignoreBounds=True)
         self.curve = self.plot.plot(pen=pg.mkPen("#1f2bff", width=3))  # Capstone draws a heavy line
+        self.curve.setZValue(1)  # the data stays on top of analysis shading and highlights
         self.overlay = self.plot.plot(pen=pg.mkPen("#c62828", width=2, style=Qt.DashLine))
         self.marks = Marks(self.plot)  # analysis drawn on the graph (cleared on every re-analysis)
         self.user_marks = Marks(self.plot)  # coordinate marker and text boxes the user placed
@@ -321,7 +322,7 @@ class GraphDisplay(QWidget):
             if self.range_check.isChecked():
                 t, y = select(t, y, *self.region.getRegion())
                 if mode != "분석 없음" and len(t) > 1:  # Capstone highlights the analysed part of the curve
-                    self.marks.line(t, y, width=9, color=QColor(255, 215, 0, 140))
+                    self.marks.line(t, y, width=9, color=QColor(255, 215, 0, 170)).setZValue(0)  # above the shading, below the curve
             if mode == "분석 없음":
                 self.result.setText("")
             elif mode == "자동 분석":

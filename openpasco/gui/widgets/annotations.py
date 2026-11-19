@@ -34,14 +34,14 @@ class Marks:
         """Shaded rectangle (Capstone's statistics / selection box)."""
         lo = self._add(pg.PlotDataItem([x0, x1], [y0, y0], pen=pg.mkPen(self._rgba(160), width=1)))
         hi = self._add(pg.PlotDataItem([x0, x1], [y1, y1], pen=pg.mkPen(self._rgba(160), width=1)))
-        self._add(pg.FillBetweenItem(lo, hi, brush=pg.mkBrush(self._rgba(alpha))))
+        self._add(pg.FillBetweenItem(lo, hi, brush=pg.mkBrush(self._rgba(alpha)))).setZValue(-2)  # under the curve
 
     def area(self, t, y, alpha=60):
         """Shade between the curve and y = 0 (Capstone's area tool)."""
         hidden = pg.mkPen(self._rgba(0))  # a curve with pen=None has no path to fill against
         top = self._add(pg.PlotDataItem(t, y, pen=hidden))
         base = self._add(pg.PlotDataItem(t, [0] * len(t), pen=hidden))
-        self._add(pg.FillBetweenItem(top, base, brush=pg.mkBrush(self._rgba(alpha))))
+        self._add(pg.FillBetweenItem(top, base, brush=pg.mkBrush(self._rgba(alpha)))).setZValue(-2)
 
     def label(self, text, x, y, anchor=(0, 1)):
         """Text in a white box with a border in the curve's colour."""
