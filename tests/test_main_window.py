@@ -792,3 +792,13 @@ def test_note_box_can_be_moved_and_is_saved(win, monkeypatch):
     assert (box.pos().x(), box.pos().y()) == (6.0, 3.0)
     g.set_notes(g.notes)
     assert g.notes[0]["bx"] == 6.0
+
+
+def test_white_mode_switches_chrome_icons_and_excludes_dark(win):
+    from openpasco.gui import icons
+    from openpasco.gui.theme import CHROME_QSS, CHROME_QSS_LIGHT
+    assert CHROME_QSS_LIGHT != CHROME_QSS and "#666666" not in CHROME_QSS_LIGHT.split("QLabel#timer")[0]
+    win.act_white.setChecked(True)
+    assert win.styleSheet() == CHROME_QSS_LIGHT and icons.LIGHT
+    win.act_dark.setChecked(True)  # dark and white exclude each other
+    assert not win.act_white.isChecked() and win.styleSheet() == CHROME_QSS and not icons.LIGHT

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from openpasco.core.calculation import CalcError, parse
 from openpasco.core.data_manager import Calc, DataManager, Run, Series
 from openpasco.gui import icons
-from openpasco.gui.theme import CHROME_QSS
+from openpasco.gui.theme import CHROME_QSS, CHROME_QSS_LIGHT
 from openpasco.core.conditions import Condition, Conditions, Gate
 from openpasco.gui.widgets.calc_dialog import CalcDialog
 from openpasco.gui.widgets.conditions_dialog import ConditionsDialog
@@ -259,6 +259,8 @@ class MainWindow(QMainWindow):
         self.view_menu.addSeparator()
         self.act_dark = QAction("다크 모드", self, checkable=True, toggled=self.set_dark)
         self.view_menu.addAction(self.act_dark)
+        self.act_white = QAction("화이트 모드", self, checkable=True, toggled=self.set_white)
+        self.view_menu.addAction(self.act_white)
         self.view_menu.addSeparator()
         mb.addMenu("도움말(&H)").addAction(act("정보", self.about))
 
@@ -492,8 +494,18 @@ class MainWindow(QMainWindow):
         if s.value("windowState"):
             self.restoreState(s.value("windowState"))
         self.act_dark.setChecked(s.value("dark", False, type=bool))
+        self.act_white.setChecked(s.value("white", False, type=bool) and not self.act_dark.isChecked())
+
+    def set_white(self, on: bool):
+        if on:
+            self.act_dark.setChecked(False)  # the two modes are exclusive
+        self.setStyleSheet(CHROME_QSS_LIGHT if on else CHROME_QSS)
+        icons.set_light(on, self)
+        QSettings().setValue("white", on)
 
     def set_dark(self, on: bool):
+        if on:
+            self.act_white.setChecked(False)
         app = QApplication.instance()
         app.setPalette(dark_palette() if on else app.style().standardPalette())
         for plot in self.findChildren(pg.PlotWidget):

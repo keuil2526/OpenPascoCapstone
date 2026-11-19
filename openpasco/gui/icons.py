@@ -2,10 +2,20 @@
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap, QPolygonF
+from PySide6.QtWidgets import QListWidget, QToolButton
 
 SIZE = 40
 SCALE = 2
+
+
+LIGHT = False  # white mode: the light greys the icons are drawn in turn dark
+_DARKER = {"#cfd8dc": "#455a64", "#eceff1": "#546e7a", "#e8e8e8": "#666666", "#c4c4c4": "#9a9a9a",
+           "#eeeeee": "#666666", "#f2f2f2": "#777777"}
+
+
+def _c(color) -> QColor:
+    return QColor(_DARKER.get(color, color) if LIGHT and isinstance(color, str) else color)
 
 
 def _icon(draw) -> QIcon:
@@ -20,7 +30,7 @@ def _icon(draw) -> QIcon:
 
 
 def _pen(color, w=2.5):
-    return QPen(QColor(color), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    return QPen(_c(color), w, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
 
 
 def graph(p):
@@ -43,7 +53,7 @@ def histogram(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawLine(7, 34, 35, 34)
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#ef5350"))
+    p.setBrush(_c("#ef5350"))
     for x, h in ((9, 8), (15, 18), (21, 26), (27, 12)):
         p.drawRect(QRectF(x, 34 - h, 5, h))
 
@@ -52,15 +62,15 @@ def bar_meter(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawRect(QRectF(13, 6, 14, 28))
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#42a5f5"))
+    p.setBrush(_c("#42a5f5"))
     p.drawRect(QRectF(14, 20, 12, 13))
 
 
 def copy(p):
     p.setPen(_pen("#cfd8dc", 2))
-    p.setBrush(QColor("#455a64"))
+    p.setBrush(_c("#455a64"))
     p.drawRect(QRectF(7, 7, 16, 20))
-    p.setBrush(QColor("#eceff1"))
+    p.setBrush(_c("#eceff1"))
     p.drawRect(QRectF(15, 14, 16, 20))
 
 
@@ -91,7 +101,7 @@ def coord(p):
 
 def note(p):
     p.setPen(_pen("#42a5f5", 2))
-    p.setBrush(QColor("#ffffff"))
+    p.setBrush(_c("#ffffff"))
     p.drawRect(QRectF(7, 9, 26, 16))
     p.setPen(_pen("#42a5f5", 2))
     p.drawLine(16, 25, 12, 33)
@@ -103,7 +113,7 @@ def table(p):
     for y in (15, 24):
         p.drawLine(5, y, 35, y)
     p.drawLine(18, 7, 18, 33)
-    p.fillRect(QRectF(6, 8, 29, 6), QColor("#5c8dd6"))
+    p.fillRect(QRectF(6, 8, 29, 6), _c("#5c8dd6"))
 
 
 def digits(p):
@@ -127,7 +137,7 @@ def meter(p):
 
 def hardware(p):
     p.setPen(_pen("#cfd8dc", 2))
-    p.setBrush(QColor("#37474f"))
+    p.setBrush(_c("#37474f"))
     p.drawRect(QRectF(10, 10, 20, 20))
     for i in (15, 20, 25):
         p.drawLine(i, 5, i, 10)
@@ -147,9 +157,9 @@ def summary(p):
 
 def calculator(p):
     p.setPen(_pen("#cfd8dc", 2))
-    p.setBrush(QColor("#37474f"))
+    p.setBrush(_c("#37474f"))
     p.drawRoundedRect(QRectF(8, 4, 24, 32), 3, 3)
-    p.fillRect(QRectF(11, 8, 18, 7), QColor("#a5d6a7"))
+    p.fillRect(QRectF(11, 8, 18, 7), _c("#a5d6a7"))
     p.setPen(_pen("#cfd8dc", 3))
     for y in (21, 27, 33):
         for x in (13, 20, 27):
@@ -158,9 +168,9 @@ def calculator(p):
 
 def record(p):
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#c4c4c4"))  # Capstone's record button is a grey sphere
+    p.setBrush(_c("#c4c4c4"))  # Capstone's record button is a grey sphere
     p.drawEllipse(QRectF(5, 5, 30, 30))
-    p.setBrush(QColor("#e53935"))
+    p.setBrush(_c("#e53935"))
     p.drawEllipse(QRectF(14, 14, 12, 12))
 
 
@@ -186,7 +196,7 @@ def trash(p):
 
 def stop(p):
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#eeeeee"))
+    p.setBrush(_c("#eeeeee"))
     p.drawRoundedRect(QRectF(10, 10, 20, 20), 3, 3)
 
 
@@ -208,28 +218,28 @@ def span(p):  # selected x range
 
 def new_doc(p):  # cream page with a folded corner (colourful toolbar icons, like Capstone's)
     p.setPen(_pen("#8a7a55", 2))
-    p.setBrush(QColor("#fff3c4"))
+    p.setBrush(_c("#fff3c4"))
     p.drawPolygon(QPolygonF([QPointF(9, 4), QPointF(26, 4), QPointF(33, 11), QPointF(33, 36), QPointF(9, 36)]))
-    p.setBrush(QColor("#e6d28a"))
+    p.setBrush(_c("#e6d28a"))
     p.drawPolygon(QPolygonF([QPointF(26, 4), QPointF(26, 11), QPointF(33, 11)]))
 
 
 def open_folder(p):
     p.setPen(_pen("#b07d12", 2))
-    p.setBrush(QColor("#f5b733"))
+    p.setBrush(_c("#f5b733"))
     p.drawPolygon(QPolygonF([QPointF(4, 10), QPointF(15, 10), QPointF(18, 14), QPointF(34, 14),
                              QPointF(34, 33), QPointF(4, 33)]))
-    p.setBrush(QColor("#ffd36b"))
+    p.setBrush(_c("#ffd36b"))
     p.drawPolygon(QPolygonF([QPointF(4, 33), QPointF(10, 19), QPointF(38, 19), QPointF(34, 33)]))
 
 
 def save_disk(p):
     p.setPen(_pen("#1b3f73", 2))
-    p.setBrush(QColor("#3a73c6"))
+    p.setBrush(_c("#3a73c6"))
     p.drawRoundedRect(QRectF(6, 5, 28, 30), 3, 3)
-    p.setBrush(QColor("#f2f2f2"))
+    p.setBrush(_c("#f2f2f2"))
     p.drawRect(QRectF(11, 5, 17, 11))
-    p.setBrush(QColor("#1b3f73"))
+    p.setBrush(_c("#1b3f73"))
     p.drawRect(QRectF(11, 23, 18, 12))
 
 
@@ -243,5 +253,27 @@ def add_page(p):
 _DRAW = {f.__name__: f for f in (graph, fit, grid, coord, note, copy, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
+_NAMES: dict[int, str] = {}  # QIcon cache key -> icon name, so set_light() can redraw every icon in use
+
+
 def icon(name: str) -> QIcon:
-    return _icon(_DRAW[name])
+    ic = _icon(_DRAW[name])
+    _NAMES[ic.cacheKey()] = name
+    return ic
+
+
+def set_light(on: bool, root):
+    """Switch the icon colours and redraw the icons of every button and action under `root`."""
+    global LIGHT
+    LIGHT = on
+    redraw = lambda ic: icon(_NAMES[ic.cacheKey()]) if ic.cacheKey() in _NAMES else None
+    for w in root.findChildren(QToolButton):
+        if (new := redraw(w.icon())):
+            w.setIcon(new)
+    for a in root.findChildren(QAction):
+        if (new := redraw(a.icon())):
+            a.setIcon(new)
+    for lst in root.findChildren(QListWidget):
+        for i in range(lst.count()):
+            if (new := redraw(lst.item(i).icon())):
+                lst.item(i).setIcon(new)

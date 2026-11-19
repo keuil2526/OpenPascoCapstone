@@ -65,3 +65,20 @@ QLabel#timer[recording="true"] { color: #ff6b6b; }
 QStatusBar { background: #666666; color: #eeeeee; max-height: 18px; }
 QStatusBar::item { border: none; }
 """
+
+# White mode: the same stylesheet with the grey chrome swapped for light greys and white text for dark text.
+_LIGHT = {"#666666": "#f0f0f0", "#6d6d6d": "#f6f6f6", "#676767": "#f3f3f3", "#5b5b5b": "#e4e4e4", "#525252": "#c8c8c8",
+          "#5a5a5a": "#e0e0e0", "#707070": "#ffffff", "#555555": "#ffffff", "#3a3a3a": "#c4c4c4", "#2f2f2f": "#b8b8b8",
+          "#8a8a8a": "#dcdcdc", "#8f8f8f": "#dcdcdc", "#7a7a7a": "#e2e2e2", "#808080": "#d4d4d4", "#9a9a9a": "#a8a8a8",
+          "#bbbbbb": "#777777", "#eeeeee": "#222222", "#b2b2b2": "#e6e6e6", "#c8c8c8": "#f0f0f0", "#9c9c9c": "#d0d0d0",
+          "color: #ffffff": "color: #222222", "color: #f0f0f0": "color: #222222"}
+
+
+def _light(qss: str) -> str:
+    head, timer, tail = qss.partition("QLabel#timer")  # the timer box stays dark
+    for old, new in _LIGHT.items():
+        head, tail = head.replace(old, new), tail.replace(old, new)
+    return head + timer + tail
+
+
+CHROME_QSS_LIGHT = _light(CHROME_QSS)
