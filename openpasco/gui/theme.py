@@ -28,7 +28,7 @@ QWidget#hw_panel QLabel#hw_hint { background: #ffffff; color: #333333; padding: 
 QListWidget#device_list { background: #707070; color: #ffffff; border: none; }
 QWidget#hw_panel QLabel, QWidget#control_row QLabel { color: #f0f0f0; }
 QToolButton#tool_btn, QToolButton#record_btn, QToolButton#action_btn {
-    color: #ffffff; border: none; border-radius: 4px; padding: 4px 2px; font-size: 11px; }
+    color: #ffffff; border: none; border-radius: 4px; padding: 4px 2px; font-size: 10px; }
 QToolButton#tool_btn:hover, QToolButton#record_btn:hover, QToolButton#action_btn:hover { background: #7a7a7a; }
 QToolButton#tool_btn:checked { background: #808080; }
 QListWidget#display_list { background: #666666; color: #ffffff; border: none; font-size: 11px; }

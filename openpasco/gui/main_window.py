@@ -62,9 +62,9 @@ class DisplayPalette(QListWidget):
         self.setFlow(QListView.TopToBottom)
         self.setMovement(QListView.Static)  # required for drag-out
         self.setWrapping(False)
-        self.setIconSize(QSize(36, 36))
-        self.setGridSize(QSize(84, 66))
-        self.setFixedWidth(96)
+        self.setIconSize(QSize(28, 28))
+        self.setGridSize(QSize(76, 56))
+        self.setFixedWidth(84)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragOnly)
         self.setToolTip("클릭하거나 페이지로 끌어다 놓아 디스플레이를 추가")
@@ -297,8 +297,8 @@ class MainWindow(QMainWindow):
         def tool(text, icon_name, slot, checkable=False):
             b = QToolButton(objectName="tool_btn", text=text, icon=icons.icon(icon_name), checkable=checkable)
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            b.setIconSize(QSize(36, 36))
-            b.setFixedWidth(76)
+            b.setIconSize(QSize(28, 28))
+            b.setFixedWidth(66)
             b.clicked.connect(slot)
             pl.addWidget(b)
             return b
