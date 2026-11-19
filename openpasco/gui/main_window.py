@@ -219,12 +219,13 @@ class MainWindow(QMainWindow):
         self.act_export = act("CSV 내보내기…", self.export_csv)
         self.act_quit = act("종료", self.close, QKeySequence.Quit)
         self.act_add_page = act("페이지 추가", self.add_page, "Ctrl+T", "add_page")
+        self.act_copy_page = act("페이지 이미지 복사", self.copy_page_image, "Ctrl+Shift+C", "copy")
         self.act_rename_page = act("페이지 이름 바꾸기…",
                                    lambda: self.rename_page(self.pages.currentIndex()), "F2")
         self.act_record = act("기록 / 정지", self.toggle_record, "Ctrl+R")
         self.act_calc = act("계산 추가…", self.add_calculation, "Ctrl+L")
         self.act_conditions = act("기록 조건…", self.set_recording_conditions)
-        self.act_delete_run = act("마지막 런 삭제", self.delete_last_run)
+        self.act_delete_run = act("마지막 런 삭제", self.delete_last_run, None, "trash")
         self.act_calc_delete = act("계산 삭제…", self.remove_calculation)
 
         mb = self.menuBar()  # menu names follow Capstone's: File / Edit / Workbook / Display / Help
@@ -249,7 +250,13 @@ class MainWindow(QMainWindow):
         tb.addActions([self.act_new, self.act_open, self.act_save])
         tb.addSeparator()
         tb.addAction(self.act_add_page)
+        tb.addSeparator()
+        tb.addActions([self.act_copy_page, self.act_delete_run])
         self.addToolBar(tb)
+
+    def copy_page_image(self):
+        QApplication.clipboard().setPixmap(self.pages.currentWidget().grab())
+        self.statusBar().showMessage("현재 페이지를 이미지로 복사했습니다.")
 
     def _build_tab_row(self):
         """Capstone's tab row spans the whole window above the side panels. The pages' own tab bar is hidden
@@ -376,8 +383,8 @@ class MainWindow(QMainWindow):
         def button(name, text, icon_name, slot, tip):
             b = QToolButton(objectName=name, text=text, icon=icons.icon(icon_name), toolTip=tip)
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            b.setIconSize(QSize(34, 34))
-            b.setMinimumWidth(70)
+            b.setIconSize(QSize(26, 26))
+            b.setMinimumWidth(62)
             b.clicked.connect(slot)
             return b
 

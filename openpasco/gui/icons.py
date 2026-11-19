@@ -56,6 +56,14 @@ def bar_meter(p):
     p.drawRect(QRectF(14, 20, 12, 13))
 
 
+def copy(p):
+    p.setPen(_pen("#cfd8dc", 2))
+    p.setBrush(QColor("#455a64"))
+    p.drawRect(QRectF(7, 7, 16, 20))
+    p.setBrush(QColor("#eceff1"))
+    p.drawRect(QRectF(15, 14, 16, 20))
+
+
 def table(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawRect(QRectF(5, 7, 30, 26))
@@ -199,7 +207,7 @@ def add_page(p):
     p.drawLine(33, 19, 33, 29)
 
 
-_DRAW = {f.__name__: f for f in (graph, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
+_DRAW = {f.__name__: f for f in (graph, copy, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
 def icon(name: str) -> QIcon:

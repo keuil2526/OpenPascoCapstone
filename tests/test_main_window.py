@@ -647,3 +647,10 @@ def test_bar_meter_fraction():
     from openpasco.gui.widgets.displays import BarMeterDisplay as B
     assert B.fraction(5, 0, 10) == 0.5 and B.fraction(99, 0, 10) == 1 and B.fraction(None, 0, 10) == 0
     assert B.fraction(1, 5, 5) == 0
+
+
+def test_copy_page_image_puts_pixmap_on_clipboard(win):
+    from PySide6.QtWidgets import QApplication
+    QApplication.clipboard().clear()
+    win.act_copy_page.trigger()
+    assert not QApplication.clipboard().pixmap().isNull()
