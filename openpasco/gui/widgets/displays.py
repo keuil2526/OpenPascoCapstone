@@ -10,12 +10,13 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QTableView, QToolButton,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QTableView, QToolButton,
     QVBoxLayout, QWidget,
 )
 
 from openpasco.analysis.numeric import MODELS, auto_analyze, derivative, fit, integral, select, statistics
 from openpasco.gui import icons
+from openpasco.gui.widgets.annotations import Marks, box_position
 from openpasco.hardware.base import Measurement
 
 
@@ -117,7 +118,7 @@ class GraphDisplay(QWidget):
 
     older_toggled = Signal()  # DisplayFrame reacts by refetching data
     title_changed = Signal()
-    ANALYSES = ["분석 없음", "자동 분석", "통계", *MODELS, "미분", "적분"]
+    ANALYSES = ["분석 없음", "자동 분석", "통계", "넓이", *MODELS, "미분", "적분"]
     DEBOUNCE_MS = 400  # analysis runs at most this often while data streams in
 
     def __init__(self):
@@ -133,7 +134,10 @@ class GraphDisplay(QWidget):
             self.plot.addItem(pg.InfiniteLine(angle=angle, pos=0, pen=pg.mkPen("#808080", width=1)), ignoreBounds=True)
         self.curve = self.plot.plot(pen=pg.mkPen("#1f2bff", width=3))  # Capstone draws a heavy line
         self.overlay = self.plot.plot(pen=pg.mkPen("#c62828", width=2, style=Qt.DashLine))
-        self.peak_marks = self.plot.plot(pen=None, symbol="t1", symbolSize=12, symbolBrush="#ff9800", symbolPen=None)
+        self.marks = Marks(self.plot)  # analysis drawn on the graph (cleared on every re-analysis)
+        self.user_marks = Marks(self.plot)  # coordinate marker and text boxes the user placed
+        self.coord_point: tuple[float, float] | None = None
+        self.notes: list[dict] = []  # [{"x": t, "text": str}] saved with the experiment
         self.region = pg.LinearRegionItem(movable=True)
         self.region.setVisible(False)
         self.plot.addItem(self.region)
@@ -156,6 +160,11 @@ class GraphDisplay(QWidget):
         self.grid_check = toggle("grid", "격자 보이기/숨기기")
         self.grid_check.setChecked(True)
         self.grid_check.toggled.connect(lambda on: self.plot.showGrid(x=on, y=on, alpha=0.3))
+        self.coord_check = toggle("coord", "좌표 도구 — 그래프를 클릭하면 그 점의 값을 표시")
+        self.note_check = toggle("note", "텍스트 상자 — 그래프를 클릭하면 그 점에 메모를 답니다")
+        self.coord_check.toggled.connect(lambda on: on and self.note_check.setChecked(False))
+        self.note_check.toggled.connect(lambda on: on and self.coord_check.setChecked(False))
+        self.plot.scene().sigMouseClicked.connect(self._clicked)
         self.analysis = QComboBox()
         self.analysis.addItems(self.ANALYSES)
         self.result = QLabel("", wordWrap=True, textInteractionFlags=Qt.TextSelectableByMouse)
@@ -184,7 +193,8 @@ class GraphDisplay(QWidget):
         self.plot.setClipToView(True)
 
     def tool_widgets(self):  # placed by DisplayFrame in its toolbar strip
-        return [self.fit_btn, self.grid_check, self.older_check, self.range_check, self.analysis]
+        return [self.fit_btn, self.grid_check, self.older_check, self.range_check, self.coord_check, self.note_check,
+                self.analysis]
 
     @property
     def wants_older(self) -> bool:
@@ -241,8 +251,18 @@ class GraphDisplay(QWidget):
             self.curve.setData(*data)
             self._marks(len(data[0]))
             self._set_ylabel(None)
+            if self.coord_point or self.notes:
+                self.draw_user_marks()
             if self.analysis.currentIndex() > 0:
                 self._schedule()
+
+    def _plain_axis(self):
+        """Tick numbers stay in the unit named on the axis (no mm for m), so they match the on-graph labels.
+        pyqtgraph still recomputes a prefix scale on every range change, hence the override."""
+        ax = self.plot.getAxis("left")
+        ax.enableAutoSIPrefix(False)
+        ax.updateAutoSIPrefix = lambda: setattr(ax, "autoSIPrefixScale", 1.0)
+        ax.autoSIPrefixScale = 1.0
 
     def _set_ylabel(self, derived):
         if self.meas is None:
@@ -252,14 +272,40 @@ class GraphDisplay(QWidget):
             name, unit = f"d{name}/dt", f"{unit}/s"
         elif derived == "적분":
             name, unit = f"∫{name}dt", f"{unit}·s"
-        self.plot.getAxis("left").enableAutoSIPrefix(bool(unit))  # no "(x0.001)" for unitless data
+        self._plain_axis()
         self.plot.setLabel("left", name, units=unit)
+
+    def _unit(self):
+        return self.meas.unit if self.meas else ""
+
+    def _view(self):
+        return self.plot.getPlotItem().vb.viewRange()
+
+    def _draw_stats(self, t, y):
+        """Capstone's statistics box: a shaded band over the range with Max / Mean / Min lines and labels."""
+        st = statistics(t, y)
+        x0, x1 = float(t[0]), float(t[-1])
+        self.marks.band(x0, x1, st.minimum, st.maximum)
+        self.marks.line([x0, x1], [st.mean, st.mean], style=Qt.DashLine)
+        self.marks.label(f"Max.: {st.maximum:.4g}", x0, st.maximum, anchor=(0, 0))
+        self.marks.label(f"Mean: {st.mean:.4g}", x0, st.mean, anchor=(0, 0.5))
+        self.marks.label(f"Min.: {st.minimum:.4g}", x0, st.minimum, anchor=(0, 1))
+        return st
+
+    def _draw_area(self, t, y):
+        area = float(np.trapezoid(y, t)) if len(t) > 1 else 0.0
+        self.marks.area(t, y)
+        mid = len(t) // 2
+        point = (float(t[mid]), float(y[mid]))
+        unit = f"{self._unit()}·s" if self._unit() else "s"
+        self.marks.callout(f"Area: {area:.4g} {unit}", point, box_position(self._view(), point))
+        return area
 
     def _analyze(self):
         self.timer.stop()
         mode = self.analysis.currentText()
         self.overlay.setData([], [])
-        self.peak_marks.setData([], [])
+        self.marks.clear()
         if self.data is None or len(self.data[0]) == 0:
             return
         t, y = self.data
@@ -278,21 +324,81 @@ class GraphDisplay(QWidget):
                 self.result.setText("")
             elif mode == "자동 분석":
                 a = auto_analyze(t, y)
+                self._draw_stats(t, y)
                 if a.fit:
                     self.overlay.setData(t, a.fit.predict(t))
-                self.peak_marks.setData([p[0] for p in a.peaks], [p[1] for p in a.peaks])
+                    top = self._view()[1][1]
+                    self.marks.label(a.fit.summary(), float(t[0]), top, anchor=(0, 0))
+                for px, py in a.peaks[:3]:
+                    self.marks.callout(f"{px:.4g} s, {py:.4g} {self._unit()}", (px, py),
+                                       box_position(self._view(), (px, py)))
                 self.result.setText(a.summary())
             elif mode == "통계":
-                s = statistics(t, y)
+                s = self._draw_stats(t, y)
                 self.result.setText(
                     f"n={s.n}  평균={s.mean:.4g}  표준편차={s.std:.4g}  "
                     f"최소={s.minimum:.4g} (t={s.t_min:.3g})  최대={s.maximum:.4g} (t={s.t_max:.3g})")
+            elif mode == "넓이":
+                area = self._draw_area(t, y)
+                self.result.setText(f"넓이 = {area:.4g}")
             else:
                 f = fit(mode, t, y)
                 self.overlay.setData(t, f.predict(t))
+                self.marks.label(f.summary(), float(t[0]), self._view()[1][1], anchor=(0, 0))
                 self.result.setText(f.summary())
         except ValueError as e:  # too few points, no convergence, empty selection
             self.result.setText(str(e))
+
+    # --- user annotations: coordinate tool and text boxes -----------------------------------------
+    def _clicked(self, event):
+        if event.button() != Qt.LeftButton or self.data is None or len(self.data[0]) == 0:
+            return
+        if not (self.coord_check.isChecked() or self.note_check.isChecked()):
+            return
+        vb = self.plot.getPlotItem().vb
+        if not vb.sceneBoundingRect().contains(event.scenePos()):
+            return
+        self.place_at(vb.mapSceneToView(event.scenePos()).x())
+
+    def place_at(self, x: float):
+        """Coordinate tool / text box at the data point nearest to time x."""
+        t, y = self.data
+        i = int(np.clip(np.searchsorted(t, x), 0, len(t) - 1))
+        if i > 0 and abs(t[i - 1] - x) < abs(t[i] - x):
+            i -= 1
+        if self.coord_check.isChecked():
+            self.coord_point = (float(t[i]), float(y[i]))
+        elif self.note_check.isChecked():
+            text = self._ask_note()
+            if not text:
+                return
+            self.notes.append({"x": float(t[i]), "text": text})
+            self.title_changed.emit()  # marks the experiment as modified
+        self.draw_user_marks()
+
+    def _ask_note(self) -> str:
+        text, ok = QInputDialog.getText(self, "텍스트 상자", "메모:")
+        return text.strip() if ok else ""
+
+    def set_notes(self, notes):
+        self.notes = [n for n in notes if isinstance(n, dict) and isinstance(n.get("text"), str)
+                      and isinstance(n.get("x"), (int, float))]
+        self.draw_user_marks()
+
+    def draw_user_marks(self):
+        self.user_marks.clear()
+        if self.data is None or len(self.data[0]) == 0:
+            return
+        t, y = self.data
+        if self.coord_point:
+            px, py = self.coord_point
+            self.user_marks.crosshair(px, py)
+            self.user_marks.callout(f"{px:.4g} s, {py:.4g} {self._unit()}", (px, py),
+                                    box_position(self._view(), (px, py)))
+        for n in self.notes:
+            i = int(np.clip(np.searchsorted(t, n["x"]), 0, len(t) - 1))
+            point = (float(t[i]), float(y[i]))
+            self.user_marks.callout(n["text"], point, box_position(self._view(), point, dx=0.04, dy=0.2))
 
 
 class ArrayModel(QAbstractTableModel):

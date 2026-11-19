@@ -81,6 +81,22 @@ def grid(p):
         p.drawLine(8, v, 32, v)
 
 
+def coord(p):
+    p.setPen(_pen("#cfd8dc", 2))
+    p.drawLine(20, 6, 20, 34)
+    p.drawLine(6, 20, 34, 20)
+    p.setPen(_pen("#42a5f5", 2.5))
+    p.drawRect(QRectF(15, 15, 10, 10))
+
+
+def note(p):
+    p.setPen(_pen("#42a5f5", 2))
+    p.setBrush(QColor("#ffffff"))
+    p.drawRect(QRectF(7, 9, 26, 16))
+    p.setPen(_pen("#42a5f5", 2))
+    p.drawLine(16, 25, 12, 33)
+
+
 def table(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawRect(QRectF(5, 7, 30, 26))
@@ -224,7 +240,7 @@ def add_page(p):
     p.drawLine(33, 19, 33, 29)
 
 
-_DRAW = {f.__name__: f for f in (graph, fit, grid, copy, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
+_DRAW = {f.__name__: f for f in (graph, fit, grid, coord, note, copy, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
 def icon(name: str) -> QIcon:

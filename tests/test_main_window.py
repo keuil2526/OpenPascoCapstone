@@ -683,9 +683,10 @@ def test_graph_auto_analysis_shows_summary_fit_and_peaks(win):
     g = _graph_with_data(win, t, 3 * np.sin(2 * np.pi * 0.5 * t))
     _pick(g, "자동 분석")
     assert "사인" in g.result.text() and "봉우리" in g.result.text()
-    assert len(g.peak_marks.getData()[0]) == 5 and len(g.overlay.getData()[0]) == 400
+    assert len(g.overlay.getData()[0]) == 400
+    assert len(g.marks.items) > 5  # band, Max/Mean/Min labels, fit label, peak callouts
     _pick(g, "분석 없음")
-    assert g.peak_marks.getData()[0] is None or len(g.peak_marks.getData()[0]) == 0
+    assert g.marks.items == []
 
 
 def test_graph_fit_and_grid_buttons(win):
@@ -697,3 +698,57 @@ def test_graph_fit_and_grid_buttons(win):
     assert g.plot.viewRange()[0][1] < 50
     g.grid_check.setChecked(False)
     assert not g.plot.getPlotItem().ctrl.xGridCheck.isChecked()
+
+
+def test_statistics_and_area_are_drawn_on_the_graph(win):
+    import numpy as np
+    import pyqtgraph as pg
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, 2 * t + 1)
+    _pick(g, "통계")
+    texts = [i.toPlainText() for i in g.marks.items if isinstance(i, pg.TextItem)]
+    assert texts == ["Max.: 21", "Mean: 11", "Min.: 1"]
+    _pick(g, "넓이")
+    texts = [i.toPlainText() for i in g.marks.items if isinstance(i, pg.TextItem)]
+    assert len(texts) == 1 and texts[0].startswith("Area: 110")  # integral of 2t+1 over 0..10 = 100 + 10
+    assert any(isinstance(i, pg.FillBetweenItem) for i in g.marks.items)
+    _pick(g, "분석 없음")
+    assert g.marks.items == []
+
+
+def test_coordinate_tool_and_text_boxes(win, monkeypatch):
+    import numpy as np
+    import pyqtgraph as pg
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, 2 * t)
+    g.coord_check.setChecked(True)
+    g.place_at(5.02)
+    texts = [i.toPlainText() for i in g.user_marks.items if isinstance(i, pg.TextItem)]
+    assert texts == ["5 s, 10 m"] and any(isinstance(i, pg.InfiniteLine) for i in g.user_marks.items)
+    monkeypatch.setattr(g, "_ask_note", lambda: "충돌")
+    g.note_check.setChecked(True)
+    assert not g.coord_check.isChecked()  # the two tools are exclusive
+    g.place_at(2.0)
+    assert g.notes == [{"x": 2.0, "text": "충돌"}]
+    g.set_notes([{"x": 3.0, "text": "a"}, {"bad": 1}])
+    assert g.notes == [{"x": 3.0, "text": "a"}]
+
+
+def test_notes_are_saved_in_the_layout(win, monkeypatch):
+    import numpy as np
+    g = _graph_with_data(win, np.linspace(0, 10, 11), np.arange(11.0))
+    g.note_check.setChecked(True)
+    monkeypatch.setattr(g, "_ask_note", lambda: "충돌")
+    g.place_at(4.0)
+    saved = win.layout_state()
+    assert any(d.get("notes") == [{"x": 4.0, "text": "충돌"}] for p in saved["pages"] for d in p["displays"])
+
+
+def test_axis_numbers_stay_in_the_unit_of_the_label(win):
+    import numpy as np
+    from PySide6.QtTest import QTest
+    t = np.linspace(0, 5, 60)
+    g = _graph_with_data(win, t, 0.7 * np.sin(t / 5 * 3))
+    _pick(g, "넓이")
+    QTest.qWait(50)
+    assert g.plot.getAxis("left").autoSIPrefixScale == 1.0
