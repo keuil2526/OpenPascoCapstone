@@ -70,8 +70,9 @@ class Marks:
         """Boxed text at `box` with a leader line to the data point `target`, which gets a bracket marker."""
         self.line([box[0], target[0]], [box[1], target[1]])
         self.label(text, *box, on_move=on_move)
-        self._add(pg.ScatterPlotItem([target[0]], [target[1]], symbol="s", size=14, brush=None,
-                                     pen=pg.mkPen(self.color, width=1.5)))
+        # a PlotDataItem, not a ScatterPlotItem: the plot's downsampling update calls methods only curves have
+        self._add(pg.PlotDataItem([target[0]], [target[1]], pen=None, symbol="s", symbolSize=14, symbolBrush=None,
+                                  symbolPen=pg.mkPen(self.color, width=1.5)))
 
     def crosshair(self, x, y):
         pen = pg.mkPen("#222222", width=1, style=Qt.DashLine)
