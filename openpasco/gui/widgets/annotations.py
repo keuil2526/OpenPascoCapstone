@@ -26,8 +26,9 @@ class Marks:
         c.setAlpha(alpha)
         return c
 
-    def line(self, xs, ys, width=1, style=Qt.SolidLine):
-        return self._add(pg.PlotDataItem(xs, ys, pen=pg.mkPen(self._rgba(200), width=width, style=style)))
+    def line(self, xs, ys, width=1, style=Qt.SolidLine, color=None):
+        pen = pg.mkPen(color or self._rgba(200), width=width, style=style)
+        return self._add(pg.PlotDataItem(xs, ys, pen=pen))
 
     def band(self, x0, x1, y0, y1, alpha=60):
         """Shaded rectangle (Capstone's statistics / selection box)."""

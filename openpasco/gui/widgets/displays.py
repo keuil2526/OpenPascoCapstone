@@ -320,6 +320,8 @@ class GraphDisplay(QWidget):
             self._set_ylabel(None)
             if self.range_check.isChecked():
                 t, y = select(t, y, *self.region.getRegion())
+                if mode != "분석 없음" and len(t) > 1:  # Capstone highlights the analysed part of the curve
+                    self.marks.line(t, y, width=9, color=QColor(255, 215, 0, 140))
             if mode == "분석 없음":
                 self.result.setText("")
             elif mode == "자동 분석":
@@ -369,6 +371,13 @@ class GraphDisplay(QWidget):
         if self.coord_check.isChecked():
             self.coord_point = (float(t[i]), float(y[i]))
         elif self.note_check.isChecked():
+            span = float(t[-1] - t[0]) or 1.0
+            near = [n for n in self.notes if abs(n["x"] - float(t[i])) <= 0.02 * span]
+            if near:  # clicking an existing text box with the tool on removes it
+                self.notes.remove(near[0])
+                self.title_changed.emit()
+                self.draw_user_marks()
+                return
             text = self._ask_note()
             if not text:
                 return

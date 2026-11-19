@@ -752,3 +752,26 @@ def test_axis_numbers_stay_in_the_unit_of_the_label(win):
     _pick(g, "넓이")
     QTest.qWait(50)
     assert g.plot.getAxis("left").autoSIPrefixScale == 1.0
+
+
+def test_clicking_an_existing_text_box_removes_it(win, monkeypatch):
+    import numpy as np
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, t)
+    monkeypatch.setattr(g, "_ask_note", lambda: "a")
+    g.note_check.setChecked(True)
+    g.place_at(5.0)
+    g.place_at(5.05)  # on top of the first one
+    assert g.notes == []
+    g.place_at(8.0)
+    assert len(g.notes) == 1
+
+
+def test_analysed_range_is_highlighted(win):
+    import numpy as np
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, t)
+    g.range_check.setChecked(True)
+    g.region.setRegion((2, 4))
+    _pick(g, "통계")
+    assert any(getattr(i, "opts", {}).get("pen") is not None and i.opts["pen"].width() == 9 for i in g.marks.items)
