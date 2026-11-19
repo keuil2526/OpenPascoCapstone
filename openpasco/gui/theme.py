@@ -34,11 +34,14 @@ QToolButton#tool_btn:checked { background: #808080; }
 QListWidget#display_list { background: #666666; color: #ffffff; border: none; font-size: 11px; }
 QListWidget#display_list::item { padding: 3px; border-radius: 4px; }
 QListWidget#display_list::item:hover { background: #7a7a7a; }
+QToolBar#page_row { background: #b2b2b2; border: none; padding: 0 4px; }
+QToolButton#tab_plus { color: #333333; font-size: 16px; padding: 0 8px; }
+QTabBar#tab_row { background: #b2b2b2; }
 QTabBar { background: #b2b2b2; }
 QTabBar::tab { background: #c8c8c8; color: #222222; padding: 5px 14px; border: 1px solid #9a9a9a;
                border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 1px; }
 QTabBar::tab:selected { background: #ffffff; color: #222222; }
-QTabWidget::pane { border: none; background: palette(base); }
+QTabWidget::pane { border: 10px solid #666666; background: palette(base); }
 QWidget#page { background: palette(base); }
 QFrame#display_frame { background: palette(base); border: none; }
 QWidget#display_bar { background: #e9e9e9; }

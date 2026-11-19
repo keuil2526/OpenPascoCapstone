@@ -138,7 +138,41 @@ def span(p):  # selected x range
     p.drawLine(4, 35, 36, 35)
 
 
-_DRAW = {f.__name__: f for f in (graph, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span)}
+def new_doc(p):  # cream page with a folded corner (colourful toolbar icons, like Capstone's)
+    p.setPen(_pen("#8a7a55", 2))
+    p.setBrush(QColor("#fff3c4"))
+    p.drawPolygon(QPolygonF([QPointF(9, 4), QPointF(26, 4), QPointF(33, 11), QPointF(33, 36), QPointF(9, 36)]))
+    p.setBrush(QColor("#e6d28a"))
+    p.drawPolygon(QPolygonF([QPointF(26, 4), QPointF(26, 11), QPointF(33, 11)]))
+
+
+def open_folder(p):
+    p.setPen(_pen("#b07d12", 2))
+    p.setBrush(QColor("#f5b733"))
+    p.drawPolygon(QPolygonF([QPointF(4, 10), QPointF(15, 10), QPointF(18, 14), QPointF(34, 14),
+                             QPointF(34, 33), QPointF(4, 33)]))
+    p.setBrush(QColor("#ffd36b"))
+    p.drawPolygon(QPolygonF([QPointF(4, 33), QPointF(10, 19), QPointF(38, 19), QPointF(34, 33)]))
+
+
+def save_disk(p):
+    p.setPen(_pen("#1b3f73", 2))
+    p.setBrush(QColor("#3a73c6"))
+    p.drawRoundedRect(QRectF(6, 5, 28, 30), 3, 3)
+    p.setBrush(QColor("#f2f2f2"))
+    p.drawRect(QRectF(11, 5, 17, 11))
+    p.setBrush(QColor("#1b3f73"))
+    p.drawRect(QRectF(11, 23, 18, 12))
+
+
+def add_page(p):
+    new_doc(p)
+    p.setPen(_pen("#2e9d3b", 4))
+    p.drawLine(28, 24, 38, 24)
+    p.drawLine(33, 19, 33, 29)
+
+
+_DRAW = {f.__name__: f for f in (graph, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
 def icon(name: str) -> QIcon:

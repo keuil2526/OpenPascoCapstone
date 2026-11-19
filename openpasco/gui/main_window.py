@@ -9,7 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDockWidget, QFileDialog, QHBoxLayout,
-    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
+    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QTabBar,
     QFrame, QPushButton, QSplitter, QStyle, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -137,6 +137,19 @@ class Page(QWidget):
         root.setVisible(bool(self.displays))
 
 
+class PageTabs(QTabWidget):
+    """QTabWidget that tells the window when tabs come and go, so a full-width tab row can mirror them."""
+    changed = Signal()
+
+    def tabInserted(self, index):
+        super().tabInserted(index)
+        self.changed.emit()
+
+    def tabRemoved(self, index):
+        super().tabRemoved(index)
+        self.changed.emit()
+
+
 class MainWindow(QMainWindow):
     scan_done = Signal(list, list)  # sensors, warnings; emitted from the scan thread
     sensor_error = Signal(str)  # emitted from sensor threads
@@ -157,17 +170,15 @@ class MainWindow(QMainWindow):
 
         self.scan_done.connect(self._on_scan_done)
         self.sensor_error.connect(self._on_sensor_error)
-        self.pages = QTabWidget(tabsClosable=True, movable=True, documentMode=True)
+        self.pages = PageTabs(tabsClosable=True, movable=True, documentMode=True)
         self.pages.tabCloseRequested.connect(self.close_page)
         self.pages.tabBarDoubleClicked.connect(self.rename_page)
         self.pages.currentChanged.connect(lambda _: self.refresh_displays())
-        plus = QToolButton(text="+", autoRaise=True, toolTip="페이지 추가 (Ctrl+T)")
-        plus.clicked.connect(self.add_page)
-        self.pages.setCornerWidget(plus, Qt.TopRightCorner)
         self.setCentralWidget(self.pages)
         self.setAcceptDrops(True)  # drop a .cap file on the window to import it
 
         self._build_actions()
+        self._build_tab_row()
         self._build_tool_dock()
         self._build_control_bar()
         self.new_experiment()
@@ -184,27 +195,26 @@ class MainWindow(QMainWindow):
 
     # --- construction -----------------------------------------------------
     def _build_actions(self):
-        icon = lambda sp: self.style().standardIcon(sp)
 
         def act(text, slot, shortcut=None, sp=None):
             a = QAction(text, self, triggered=slot)
             if shortcut:
                 a.setShortcut(shortcut)
             if sp is not None:
-                a.setIcon(icon(sp))
+                a.setIcon(icons.icon(sp))
             return a
 
-        self.act_new = act("새 실험", self.new_experiment, QKeySequence.New, QStyle.SP_FileIcon)
-        self.act_open = act("열기… (.cap)", self.open_experiment, QKeySequence.Open, QStyle.SP_DialogOpenButton)
-        self.act_save = act("저장", self.save_experiment, QKeySequence.Save, QStyle.SP_DialogSaveButton)
+        self.act_new = act("새 실험", self.new_experiment, QKeySequence.New, "new_doc")
+        self.act_open = act("열기… (.cap)", self.open_experiment, QKeySequence.Open, "open_folder")
+        self.act_save = act("저장", self.save_experiment, QKeySequence.Save, "save_disk")
         self.act_save_as = act("다른 이름으로 저장…", lambda: self.save_experiment(as_new=True),
                                QKeySequence.SaveAs)
         self.act_export = act("CSV 내보내기…", self.export_csv)
         self.act_quit = act("종료", self.close, QKeySequence.Quit)
-        self.act_add_page = act("페이지 추가", self.add_page, "Ctrl+T", QStyle.SP_FileDialogNewFolder)
+        self.act_add_page = act("페이지 추가", self.add_page, "Ctrl+T", "add_page")
         self.act_rename_page = act("페이지 이름 바꾸기…",
                                    lambda: self.rename_page(self.pages.currentIndex()), "F2")
-        self.act_record = act("기록 / 정지", self.toggle_record, "Ctrl+R", QStyle.SP_MediaPlay)
+        self.act_record = act("기록 / 정지", self.toggle_record, "Ctrl+R")
         self.act_calc = act("계산 추가…", self.add_calculation, "Ctrl+L")
         self.act_conditions = act("기록 조건…", self.set_recording_conditions)
         self.act_delete_run = act("마지막 런 삭제", self.delete_last_run)
@@ -233,6 +243,50 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addAction(self.act_add_page)
         self.addToolBar(tb)
+
+    def _build_tab_row(self):
+        """Capstone's tab row spans the whole window above the side panels. The pages' own tab bar is hidden
+        and this bar mirrors it (a QToolBar is the only thing that can sit above the dock areas)."""
+        self.pages.tabBar().hide()
+        self.tab_row = QTabBar(tabsClosable=True, movable=True, drawBase=False, expanding=False,
+                               objectName="tab_row")
+        self._syncing = False
+        row = QToolBar("페이지", movable=False, objectName="page_row")
+        self.addToolBarBreak(Qt.TopToolBarArea)
+        row.addWidget(self.tab_row)
+        plus = QToolButton(text="+", autoRaise=True, toolTip="페이지 추가 (Ctrl+T)", objectName="tab_plus")
+        plus.clicked.connect(self.add_page)
+        row.addWidget(plus)
+        self.addToolBar(Qt.TopToolBarArea, row)
+        self.pages.changed.connect(self.sync_tab_row)
+        self.pages.currentChanged.connect(lambda _: self.sync_tab_row())
+
+        def current(i):
+            if not self._syncing and i >= 0:
+                self.pages.setCurrentIndex(i)
+
+        def moved(a, b):
+            if not self._syncing:
+                self.pages.tabBar().moveTab(a, b)
+
+        self.tab_row.currentChanged.connect(current)
+        self.tab_row.tabCloseRequested.connect(self.close_page)
+        self.tab_row.tabMoved.connect(moved)
+        self.tab_row.tabBarDoubleClicked.connect(self.rename_page)
+
+    def sync_tab_row(self):
+        bar, n = self.tab_row, self.pages.count()
+        self._syncing = True
+        try:
+            while bar.count() > n:
+                bar.removeTab(bar.count() - 1)
+            while bar.count() < n:
+                bar.addTab("")
+            for i in range(n):
+                bar.setTabText(i, self.pages.tabText(i))
+            bar.setCurrentIndex(self.pages.currentIndex())
+        finally:
+            self._syncing = False
 
     def _build_tool_dock(self):
         # left: tool palette + hardware panel
@@ -701,6 +755,7 @@ class MainWindow(QMainWindow):
         name, ok = QInputDialog.getText(self, "페이지 이름", "새 이름:", text=self.pages.tabText(index))
         if ok and name.strip():
             self.pages.setTabText(index, name.strip())
+            self.sync_tab_row()
             self._mark_dirty()
 
     def close_page(self, index: int):

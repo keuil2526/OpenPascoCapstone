@@ -205,6 +205,13 @@ class GraphDisplay(QWidget):
         if not self.timer.isActive():
             self.timer.start()
 
+    def _marks(self, n: int):
+        """Capstone draws a dot on every sample; only while the points are few (drawing many is slow)."""
+        self.curve.setSymbol("o" if n <= 300 else None)
+        self.curve.setSymbolSize(5)
+        self.curve.setSymbolBrush("#1f2bff")
+        self.curve.setSymbolPen(None)
+
     def show(self, meas, data):
         self.meas, self.data = meas, data
         if data is None or len(data[0]) == 0:
@@ -216,6 +223,7 @@ class GraphDisplay(QWidget):
             self._schedule()  # derived curve replaces the raw one in _analyze
         else:
             self.curve.setData(*data)
+            self._marks(len(data[0]))
             self._set_ylabel(None)
             if self.analysis.currentIndex() > 0:
                 self._schedule()
