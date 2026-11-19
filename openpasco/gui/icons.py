@@ -92,8 +92,10 @@ def calculator(p):
 
 def record(p):
     p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#c4c4c4"))  # Capstone's record button is a grey sphere
+    p.drawEllipse(QRectF(5, 5, 30, 30))
     p.setBrush(QColor("#e53935"))
-    p.drawEllipse(QRectF(8, 8, 24, 24))
+    p.drawEllipse(QRectF(14, 14, 12, 12))
 
 
 def clock(p):
