@@ -39,6 +39,7 @@ QListWidget#display_list { background: #666666; color: #ffffff; border: none; fo
 QListWidget#display_list::item { padding: 3px; border-radius: 4px; }
 QListWidget#display_list::item:hover { background: #7a7a7a; }
 QToolBar#page_row { background: #b2b2b2; border: none; padding: 0 4px; }
+QToolBar#page_row QToolButton:checked { background: #9c9c9c; border-radius: 3px; }
 QToolButton#tab_plus { color: #333333; font-size: 16px; padding: 0 8px; }
 QTabBar#tab_row { background: #b2b2b2; }
 QTabBar { background: #b2b2b2; }

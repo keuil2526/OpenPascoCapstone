@@ -664,3 +664,14 @@ def test_dock_close_button_hides_and_view_menu_restores(win):
     assert not dock.isVisible()
     dock.toggleViewAction().trigger()
     assert dock.isVisible()
+
+
+def test_tab_row_panel_toggles_hide_and_show_panels(win):
+    from PySide6.QtWidgets import QDockWidget
+    win.show()
+    dock = win.findChild(QDockWidget, "display_dock")
+    act = next(a for a in win.page_row.actions() if a.toolTip().startswith("디스플레이 패널"))
+    act.trigger()
+    assert not dock.isVisible()
+    act.trigger()
+    assert dock.isVisible()

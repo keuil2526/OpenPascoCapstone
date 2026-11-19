@@ -109,6 +109,7 @@ def style_plot(plot: pg.PlotWidget):
         axis = plot.getAxis(name)
         axis.setPen(fg)
         axis.setTextPen(fg)
+        axis.setStyle(tickFont=QFont("sans-serif", 11))
 
 
 class GraphDisplay(QWidget):
@@ -130,7 +131,7 @@ class GraphDisplay(QWidget):
         self.plot.setClipToView(True)
         for angle in (0, 90):  # Capstone draws the x=0 / y=0 axes as dark lines
             self.plot.addItem(pg.InfiniteLine(angle=angle, pos=0, pen=pg.mkPen("#808080", width=1)), ignoreBounds=True)
-        self.curve = self.plot.plot(pen=pg.mkPen("#1f2bff", width=2))
+        self.curve = self.plot.plot(pen=pg.mkPen("#1f2bff", width=3))  # Capstone draws a heavy line
         self.overlay = self.plot.plot(pen=pg.mkPen("#c62828", width=2, style=Qt.DashLine))
         self.region = pg.LinearRegionItem(movable=True)
         self.region.setVisible(False)
@@ -208,7 +209,7 @@ class GraphDisplay(QWidget):
     def _marks(self, n: int):
         """Capstone draws a dot on every sample; only while the points are few (drawing many is slow)."""
         self.curve.setSymbol("o" if n <= 300 else None)
-        self.curve.setSymbolSize(5)
+        self.curve.setSymbolSize(7)
         self.curve.setSymbolBrush("#1f2bff")
         self.curve.setSymbolPen(None)
 

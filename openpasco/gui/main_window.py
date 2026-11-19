@@ -205,6 +205,7 @@ class MainWindow(QMainWindow):
         self._build_tab_row()
         self._build_tool_dock()
         self._build_control_bar()
+        self._add_panel_toggles()
         self.new_experiment()
         self._restore_layout()
 
@@ -282,7 +283,7 @@ class MainWindow(QMainWindow):
         self.tab_row = QTabBar(tabsClosable=True, movable=True, drawBase=False, expanding=False,
                                objectName="tab_row")
         self._syncing = False
-        row = QToolBar("페이지", movable=False, objectName="page_row")
+        row = self.page_row = QToolBar("페이지", movable=False, objectName="page_row")
         self.addToolBarBreak(Qt.TopToolBarArea)
         row.addWidget(self.tab_row)
         plus = QToolButton(text="+", autoRaise=True, toolTip="페이지 추가 (Ctrl+T)", objectName="tab_plus")
@@ -304,6 +305,18 @@ class MainWindow(QMainWindow):
         self.tab_row.tabCloseRequested.connect(self.close_page)
         self.tab_row.tabMoved.connect(moved)
         self.tab_row.tabBarDoubleClicked.connect(self.rename_page)
+
+    def _add_panel_toggles(self):
+        """The small icons left of Capstone's tab row: here they show/hide the tools, displays and controls panels."""
+        first = self.page_row.actions()[0]
+        for icon_name, tip, target in (("hardware", "도구 패널", self.findChild(QDockWidget, "tool_dock")),
+                                       ("graph", "디스플레이 패널", self.findChild(QDockWidget, "display_dock")),
+                                       ("record", "제어 바", self.findChild(QToolBar, "control_bar"))):
+            a = target.toggleViewAction()
+            a.setIcon(icons.icon(icon_name))
+            a.setToolTip(tip + " 보이기/숨기기")
+            self.page_row.insertAction(first, a)
+        self.page_row.insertSeparator(first)
 
     def sync_tab_row(self):
         bar, n = self.tab_row, self.pages.count()
