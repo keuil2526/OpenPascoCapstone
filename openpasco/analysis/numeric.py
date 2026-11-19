@@ -108,3 +108,46 @@ def derivative(t, y) -> np.ndarray:
 def integral(t, y) -> np.ndarray:
     """Cumulative trapezoid integral, starting at 0."""
     return cumulative_trapezoid(y, t, initial=0.0)
+
+
+@dataclass(frozen=True)
+class Auto:
+    stats: Stats
+    fit: Fit | None  # best model by AIC, None if no model could be fitted
+    peaks: list[tuple[float, float]]  # (t, y) of prominent maxima
+    trend: str  # "증가" / "감소" / "일정"
+
+    def summary(self) -> str:
+        s = self.stats
+        lines = [f"n={s.n}  평균={s.mean:.4g}  최소={s.minimum:.4g}  최대={s.maximum:.4g}  추세: {self.trend}"]
+        lines.append(f"가장 잘 맞는 모델 — {self.fit.summary()}" if self.fit else "맞는 모델을 찾지 못했습니다")
+        if self.peaks:
+            lines.append("봉우리: " + ", ".join(f"t={pt:.3g} → {py:.4g}" for pt, py in self.peaks[:5]))
+        return "\n".join(lines)
+
+
+def auto_analyze(t, y) -> Auto:
+    """Statistics, best-fitting model (lowest AIC; models are only tried when there are enough points),
+    prominent peaks (prominence >= 20 % of the range) and the overall trend (linear slope vs noise)."""
+    from scipy.signal import find_peaks
+    t, y = np.asarray(t, float), np.asarray(y, float)
+    st = statistics(t, y)
+    best = None
+    for name, (_, names, _) in MODELS.items():
+        try:
+            f = fit(name, t, y)
+        except ValueError:
+            continue
+        rss = max(float(np.sum((y - f.predict(t)) ** 2)), 1e-300)
+        aic = len(y) * np.log(rss / len(y)) + 2 * len(names)
+        if best is None or aic < best[0] - 2:  # -2: a more complex model must clearly win
+            best = (aic, f)
+    rng = float(np.ptp(y))
+    idx = find_peaks(y, prominence=0.2 * rng)[0] if rng > 0 and len(y) > 2 else []
+    trend = "일정"
+    if len(y) > 2 and rng > 0:
+        lin = fit("선형", t, y)
+        change = lin.params["m"] * (t[-1] - t[0])
+        if abs(change) > 0.2 * rng:
+            trend = "증가" if change > 0 else "감소"
+    return Auto(st, best[1] if best else None, [(float(t[i]), float(y[i])) for i in idx], trend)

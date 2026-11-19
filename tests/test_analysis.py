@@ -48,3 +48,23 @@ def test_derivative_and_integral_inverse():
     assert i[0] == 0 and i[-1] == pytest.approx(np.sin(10), abs=1e-3)
     with pytest.raises(ValueError):
         nm.derivative(np.array([1.0]), np.array([1.0]))
+
+
+def test_auto_analyze_picks_linear_for_a_line():
+    from openpasco.analysis.numeric import auto_analyze
+    t = np.linspace(0, 10, 50)
+    a = auto_analyze(t, 2 * t + 1)
+    assert a.fit.name == "선형" and a.trend == "증가" and a.peaks == []
+
+
+def test_auto_analyze_finds_sine_and_peaks():
+    from openpasco.analysis.numeric import auto_analyze
+    t = np.linspace(0, 10, 400)
+    a = auto_analyze(t, 3 * np.sin(2 * np.pi * 0.5 * t))
+    assert a.fit.name == "사인" and len(a.peaks) == 5 and a.trend == "일정"
+
+
+def test_auto_analyze_few_points_does_not_crash():
+    from openpasco.analysis.numeric import auto_analyze
+    a = auto_analyze([0, 1], [1, 1])
+    assert a.fit is None and "n=2" in a.summary()

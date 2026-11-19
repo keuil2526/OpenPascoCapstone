@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from openpasco.analysis.numeric import MODELS, derivative, fit, integral, select, statistics
+from openpasco.analysis.numeric import MODELS, auto_analyze, derivative, fit, integral, select, statistics
 from openpasco.gui import icons
 from openpasco.hardware.base import Measurement
 
@@ -117,7 +117,7 @@ class GraphDisplay(QWidget):
 
     older_toggled = Signal()  # DisplayFrame reacts by refetching data
     title_changed = Signal()
-    ANALYSES = ["분석 없음", "통계", *MODELS, "미분", "적분"]
+    ANALYSES = ["분석 없음", "자동 분석", "통계", *MODELS, "미분", "적분"]
     DEBOUNCE_MS = 400  # analysis runs at most this often while data streams in
 
     def __init__(self):
@@ -133,6 +133,7 @@ class GraphDisplay(QWidget):
             self.plot.addItem(pg.InfiniteLine(angle=angle, pos=0, pen=pg.mkPen("#808080", width=1)), ignoreBounds=True)
         self.curve = self.plot.plot(pen=pg.mkPen("#1f2bff", width=3))  # Capstone draws a heavy line
         self.overlay = self.plot.plot(pen=pg.mkPen("#c62828", width=2, style=Qt.DashLine))
+        self.peak_marks = self.plot.plot(pen=None, symbol="t1", symbolSize=12, symbolBrush="#ff9800", symbolPen=None)
         self.region = pg.LinearRegionItem(movable=True)
         self.region.setVisible(False)
         self.plot.addItem(self.region)
@@ -244,6 +245,7 @@ class GraphDisplay(QWidget):
         self.timer.stop()
         mode = self.analysis.currentText()
         self.overlay.setData([], [])
+        self.peak_marks.setData([], [])
         if self.data is None or len(self.data[0]) == 0:
             return
         t, y = self.data
@@ -260,6 +262,12 @@ class GraphDisplay(QWidget):
                 t, y = select(t, y, *self.region.getRegion())
             if mode == "분석 없음":
                 self.result.setText("")
+            elif mode == "자동 분석":
+                a = auto_analyze(t, y)
+                if a.fit:
+                    self.overlay.setData(t, a.fit.predict(t))
+                self.peak_marks.setData([p[0] for p in a.peaks], [p[1] for p in a.peaks])
+                self.result.setText(a.summary())
             elif mode == "통계":
                 s = statistics(t, y)
                 self.result.setText(
