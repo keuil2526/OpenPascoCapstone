@@ -138,7 +138,7 @@ class GraphDisplay(QWidget):
 
         self.legend = self.plot.addLegend(offset=(-10, 10))
         self.older: list[pg.PlotDataItem] = []
-        self.older_names: list[str] = []
+        self.older_names: list[str] | None = None
         def toggle(icon_name, tip):  # icon toggle like Capstone's graph toolbar
             b = QToolButton(icon=icons.icon(icon_name), toolTip=tip, checkable=True, autoRaise=True)
             b.setIconSize(QSize(22, 22))
@@ -191,7 +191,7 @@ class GraphDisplay(QWidget):
             self.older.append(item)
             if rebuild:
                 self.legend.addItem(item, names[i])
-        if rebuild and runs:
+        if rebuild:
             self.legend.addItem(self.curve, "최신 런")
 
     def _range_toggled(self, on):

@@ -54,5 +54,6 @@ QLineEdit#graph_title { background: transparent; border: none; color: #333333; p
 QLabel#timer { background: #2e2e2e; color: #ffffff; border: 1px solid #8b8b8b; border-radius: 6px; padding: 2px 16px;
                font-family: monospace; font-size: 26px; font-weight: bold; }
 QLabel#timer[recording="true"] { color: #ff6b6b; }
-QStatusBar { background: #5a5a5a; color: #eeeeee; }
+QStatusBar { background: #666666; color: #eeeeee; max-height: 18px; }
+QStatusBar::item { border: none; }
 """

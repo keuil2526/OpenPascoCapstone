@@ -9,7 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDockWidget, QFileDialog, QHBoxLayout,
-    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QTabBar,
+    QInputDialog, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QStatusBar, QTabBar,
     QFrame, QPushButton, QSplitter, QStyle, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -63,8 +63,8 @@ class DisplayPalette(QListWidget):
         self.setMovement(QListView.Static)  # required for drag-out
         self.setWrapping(False)
         self.setIconSize(QSize(28, 28))
-        self.setGridSize(QSize(76, 56))
-        self.setFixedWidth(84)
+        self.setGridSize(QSize(84, 56))
+        self.setFixedWidth(94)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragOnly)
         self.setToolTip("클릭하거나 페이지로 끌어다 놓아 디스플레이를 추가")
@@ -137,6 +137,12 @@ class Page(QWidget):
         root.setVisible(bool(self.displays))
 
 
+class TimedStatusBar(QStatusBar):
+    """Capstone has no permanent status text; messages fade after a few seconds."""
+    def showMessage(self, text, ms=8000):
+        super().showMessage(text, ms)
+
+
 class PageTabs(QTabWidget):
     """QTabWidget that tells the window when tabs come and go, so a full-width tab row can mirror them."""
     changed = Signal()
@@ -177,6 +183,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.pages)
         self.setAcceptDrops(True)  # drop a .cap file on the window to import it
 
+        self.setStatusBar(TimedStatusBar())
         self._build_actions()
         self._build_tab_row()
         self._build_tool_dock()
@@ -477,7 +484,7 @@ class MainWindow(QMainWindow):
         self.pages.clear()
         self.add_page()
         self._set_clean()
-        self.statusBar().showMessage("새 실험")
+        self.statusBar().showMessage("새 실험", 5000)
 
     # --- files ------------------------------------------------------------
     def layout_state(self) -> dict:
