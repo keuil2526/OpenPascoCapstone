@@ -64,6 +64,23 @@ def copy(p):
     p.drawRect(QRectF(15, 14, 16, 20))
 
 
+def fit(p):
+    p.setPen(_pen("#42a5f5", 2.5))
+    for a, b, c, d in ((8, 14, 8, 8), (8, 8, 14, 8), (32, 8, 26, 8), (32, 8, 32, 14),
+                       (8, 26, 8, 32), (8, 32, 14, 32), (32, 26, 32, 32), (32, 32, 26, 32)):
+        p.drawLine(a, b, c, d)
+    p.setPen(_pen("#cfd8dc", 2))
+    p.drawLine(15, 25, 20, 17)
+    p.drawLine(20, 17, 25, 23)
+
+
+def grid(p):
+    p.setPen(_pen("#90a4ae", 2))
+    for v in (12, 20, 28):
+        p.drawLine(v, 8, v, 32)
+        p.drawLine(8, v, 32, v)
+
+
 def table(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawRect(QRectF(5, 7, 30, 26))
@@ -207,7 +224,7 @@ def add_page(p):
     p.drawLine(33, 19, 33, 29)
 
 
-_DRAW = {f.__name__: f for f in (graph, copy, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
+_DRAW = {f.__name__: f for f in (graph, fit, grid, copy, bar_meter, fft, histogram, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
 def icon(name: str) -> QIcon:

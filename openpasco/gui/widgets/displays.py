@@ -149,6 +149,13 @@ class GraphDisplay(QWidget):
 
         self.older_check = toggle("overlay", "이전 런 겹쳐보기")
         self.range_check = toggle("span", "구간 선택")
+        self.fit_btn = QToolButton(icon=icons.icon("fit"), toolTip="크기 맞춤 (전체 데이터가 보이게)", autoRaise=True,
+                                   objectName="graph_tool")
+        self.fit_btn.setIconSize(QSize(22, 22))
+        self.fit_btn.clicked.connect(self.fit_view)
+        self.grid_check = toggle("grid", "격자 보이기/숨기기")
+        self.grid_check.setChecked(True)
+        self.grid_check.toggled.connect(lambda on: self.plot.showGrid(x=on, y=on, alpha=0.3))
         self.analysis = QComboBox()
         self.analysis.addItems(self.ANALYSES)
         self.result = QLabel("", wordWrap=True, textInteractionFlags=Qt.TextSelectableByMouse)
@@ -169,8 +176,15 @@ class GraphDisplay(QWidget):
         self.region.sigRegionChanged.connect(self._schedule)
         self.analysis.currentIndexChanged.connect(lambda _: self._analyze())
 
+    def fit_view(self):
+        """Show all data. Clipping to the view is off meanwhile, or panned-away data would not count."""
+        self.plot.setClipToView(False)
+        self.plot.enableAutoRange()
+        self.plot.autoRange()
+        self.plot.setClipToView(True)
+
     def tool_widgets(self):  # placed by DisplayFrame in its toolbar strip
-        return [self.older_check, self.range_check, self.analysis]
+        return [self.fit_btn, self.grid_check, self.older_check, self.range_check, self.analysis]
 
     @property
     def wants_older(self) -> bool:

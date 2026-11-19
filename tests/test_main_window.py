@@ -686,3 +686,14 @@ def test_graph_auto_analysis_shows_summary_fit_and_peaks(win):
     assert len(g.peak_marks.getData()[0]) == 5 and len(g.overlay.getData()[0]) == 400
     _pick(g, "분석 없음")
     assert g.peak_marks.getData()[0] is None or len(g.peak_marks.getData()[0]) == 0
+
+
+def test_graph_fit_and_grid_buttons(win):
+    import numpy as np
+    t = np.linspace(0, 10, 50)
+    g = _graph_with_data(win, t, t)
+    g.plot.setXRange(100, 200)
+    g.fit_btn.click()
+    assert g.plot.viewRange()[0][1] < 50
+    g.grid_check.setChecked(False)
+    assert not g.plot.getPlotItem().ctrl.xGridCheck.isChecked()
