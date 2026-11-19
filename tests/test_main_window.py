@@ -1,3 +1,4 @@
+import numpy as np
 import os
 import tempfile
 
@@ -34,10 +35,10 @@ def test_starts_with_one_page(win):
 def test_add_and_remove_displays(win):
     page = win.pages.currentWidget()
     frames = [page.add_display(kind) for kind in DISPLAY_TYPES]
-    assert len(page.displays) == 4
+    assert len(page.displays) == len(DISPLAY_TYPES)
     assert not page.hint.isVisibleTo(page)
     page.remove_display(frames[0])
-    assert len(page.displays) == 3
+    assert len(page.displays) == len(DISPLAY_TYPES) - 1
 
 
 def test_pages_last_page_cannot_close(win):
@@ -625,3 +626,11 @@ def test_graph_title_saved_and_marks_dirty(win, tmp_path, monkeypatch):
     assert win.layout_state()["pages"][0]["displays"][0]["title"] == "진자 실험"
     win.apply_layout(win.layout_state())
     assert win.pages.currentWidget().displays[0].body.title_edit.text() == "진자 실험"
+
+
+def test_fft_finds_sine_frequency():
+    from openpasco.gui.widgets.displays import FftDisplay
+    t = np.arange(0, 2, 0.01)
+    f, a = FftDisplay.spectrum(t, 3 * np.sin(2 * np.pi * 5 * t) + 10)
+    assert abs(f[np.argmax(a)] - 5) < 0.5 and abs(a.max() - 3) < 0.3
+    assert FftDisplay.spectrum([0, 1], [1, 2]) is None

@@ -51,7 +51,7 @@ def dark_palette() -> QPalette:
 class DisplayPalette(QListWidget):
     """List of display types; items can be dragged onto a page."""
 
-    ICON_FOR = {"그래프": "graph", "테이블": "table", "숫자": "digits", "미터": "meter"}
+    ICON_FOR = {"그래프": "graph", "테이블": "table", "숫자": "digits", "미터": "meter", "FFT": "fft"}
 
     def __init__(self):
         super().__init__()

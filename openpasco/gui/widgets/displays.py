@@ -413,9 +413,35 @@ class MeterDisplay(Meter):
         self.set_value(None if data is None or len(data[1]) == 0 else float(data[1][-1]))
 
 
+class FftDisplay(pg.PlotWidget):
+    """Amplitude spectrum of the newest run. Assumes even sampling (mean interval); the DC part is removed."""
+
+    def __init__(self):
+        super().__init__()
+        style_plot(self)
+        self.setLabel("bottom", "주파수 (Hz)")
+        self.setLabel("left", "진폭")
+        self.curve = self.plot(pen=pg.mkPen("#1f2bff", width=2))
+
+    @staticmethod
+    def spectrum(t, y):
+        """(freqs, amplitudes) or None when there are too few samples."""
+        t, y = np.asarray(t, float), np.asarray(y, float)
+        if len(t) < 4 or t[-1] <= t[0]:
+            return None
+        dt = (t[-1] - t[0]) / (len(t) - 1)
+        amp = np.abs(np.fft.rfft(y - y.mean())) * 2 / len(y)
+        return np.fft.rfftfreq(len(y), dt)[1:], amp[1:]
+
+    def show(self, meas, data):
+        spec = None if data is None else self.spectrum(*data)
+        self.curve.setData(*(spec if spec else ([], [])))
+
+
 DISPLAY_TYPES = {
     "그래프": GraphDisplay,
     "테이블": TableDisplay,
     "숫자": DigitsDisplay,
     "미터": MeterDisplay,
+    "FFT": FftDisplay,
 }

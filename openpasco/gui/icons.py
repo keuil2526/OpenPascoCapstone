@@ -31,6 +31,14 @@ def graph(p):
     p.drawPolyline(QPolygonF([QPointF(9, 28), QPointF(16, 14), QPointF(23, 24), QPointF(31, 8)]))
 
 
+def fft(p):
+    p.setPen(_pen("#cfd8dc", 2))
+    p.drawLine(7, 34, 35, 34)
+    p.setPen(_pen("#66bb6a", 3))
+    for x, h in ((11, 12), (17, 26), (23, 8), (29, 16)):
+        p.drawLine(x, 34, x, 34 - h)
+
+
 def table(p):
     p.setPen(_pen("#cfd8dc", 2))
     p.drawRect(QRectF(5, 7, 30, 26))
@@ -174,7 +182,7 @@ def add_page(p):
     p.drawLine(33, 19, 33, 29)
 
 
-_DRAW = {f.__name__: f for f in (graph, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
+_DRAW = {f.__name__: f for f in (graph, fft, table, digits, meter, hardware, summary, calculator, record, stop, clock, trash, overlay, span, new_doc, open_folder, save_disk, add_page)}
 
 
 def icon(name: str) -> QIcon:
