@@ -775,3 +775,20 @@ def test_analysed_range_is_highlighted(win):
     g.region.setRegion((2, 4))
     _pick(g, "통계")
     assert any(getattr(i, "opts", {}).get("pen") is not None and i.opts["pen"].width() == 9 for i in g.marks.items)
+
+
+def test_note_box_can_be_moved_and_is_saved(win, monkeypatch):
+    import numpy as np
+    from openpasco.gui.widgets.annotations import DragLabel
+    t = np.linspace(0, 10, 101)
+    g = _graph_with_data(win, t, 2 * t)
+    monkeypatch.setattr(g, "_ask_note", lambda: "충돌")
+    g.note_check.setChecked(True)
+    g.place_at(2.0)
+    box = next(i for i in g.user_marks.items if isinstance(i, DragLabel))
+    box.on_move(6.0, 3.0)  # what the end of a drag calls
+    assert g.notes[0]["bx"] == 6.0 and g.notes[0]["by"] == 3.0
+    box = next(i for i in g.user_marks.items if isinstance(i, DragLabel))
+    assert (box.pos().x(), box.pos().y()) == (6.0, 3.0)
+    g.set_notes(g.notes)
+    assert g.notes[0]["bx"] == 6.0

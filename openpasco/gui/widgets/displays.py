@@ -408,7 +408,13 @@ class GraphDisplay(QWidget):
         for n in self.notes:
             i = int(np.clip(np.searchsorted(t, n["x"]), 0, len(t) - 1))
             point = (float(t[i]), float(y[i]))
-            self.user_marks.callout(n["text"], point, box_position(self._view(), point, dx=0.04, dy=0.2))
+            box = (n["bx"], n["by"]) if "bx" in n else box_position(self._view(), point, dx=0.04, dy=0.2)
+            self.user_marks.callout(n["text"], point, box, on_move=lambda bx, by, n=n: self.move_note(n, bx, by))
+
+    def move_note(self, note, bx, by):
+        note["bx"], note["by"] = float(bx), float(by)  # saved with the experiment
+        self.title_changed.emit()
+        self.draw_user_marks()
 
 
 class ArrayModel(QAbstractTableModel):

@@ -5,6 +5,21 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 
+class DragLabel(pg.TextItem):
+    """Text box the user can drag; `on_move(x, y)` gets the new data position when the drag ends."""
+    on_move = None
+
+    def mouseDragEvent(self, ev):
+        if ev.button() != Qt.LeftButton:
+            return ev.ignore()
+        ev.accept()
+        if ev.isStart():
+            self._grab = self.pos() - self.parentItem().mapFromScene(ev.buttonDownScenePos())
+        self.setPos(self.parentItem().mapFromScene(ev.scenePos()) + self._grab)
+        if ev.isFinish() and self.on_move:
+            self.on_move(self.pos().x(), self.pos().y())
+
+
 class Marks:
     def __init__(self, plot: pg.PlotWidget, color="#1f2bff"):
         self.plot = plot
@@ -43,17 +58,18 @@ class Marks:
         base = self._add(pg.PlotDataItem(t, [0] * len(t), pen=hidden))
         self._add(pg.FillBetweenItem(top, base, brush=pg.mkBrush(self._rgba(alpha)))).setZValue(-2)
 
-    def label(self, text, x, y, anchor=(0, 1)):
-        """Text in a white box with a border in the curve's colour."""
-        item = pg.TextItem(text, color="#222222", anchor=anchor, border=pg.mkPen(self.color, width=1.5),
+    def label(self, text, x, y, anchor=(0, 1), on_move=None):
+        """Text in a white box with a border in the curve's colour; draggable when `on_move` is given."""
+        item = (DragLabel if on_move else pg.TextItem)(text, color="#222222", anchor=anchor, border=pg.mkPen(self.color, width=1.5),
                            fill=pg.mkBrush("#ffffff"))
         item.setPos(x, y)
+        item.on_move = on_move
         return self._add(item)
 
-    def callout(self, text, target, box):
+    def callout(self, text, target, box, on_move=None):
         """Boxed text at `box` with a leader line to the data point `target`, which gets a bracket marker."""
         self.line([box[0], target[0]], [box[1], target[1]])
-        self.label(text, *box)
+        self.label(text, *box, on_move=on_move)
         self._add(pg.ScatterPlotItem([target[0]], [target[1]], symbol="s", size=14, brush=None,
                                      pen=pg.mkPen(self.color, width=1.5)))
 
