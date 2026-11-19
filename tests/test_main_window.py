@@ -187,14 +187,14 @@ def _record_a_bit(win):
 
 def test_save_open_roundtrip(win, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog, QMessageBox
-    p = str(tmp_path / "e.opasco")
+    p = str(tmp_path / "e.cap")
     _record_a_bit(win)
     win.pages.setTabText(0, "내 실험")
     from openpasco.core.conditions import Condition, Conditions
     win.conditions = Conditions(Condition("measure", "sim-motion:position", "<", 0.5), Condition("time", value=3))
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
     win.save_experiment()
-    assert win.path.name == "e.opasco" and "e.opasco" in win.windowTitle()
+    assert win.path.name == "e.cap" and "e.cap" in win.windowTitle()
     n = len(win.dm.latest("sim-motion:position")[0])
 
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
@@ -212,7 +212,7 @@ def test_save_open_roundtrip(win, tmp_path, monkeypatch):
 
 def test_open_bad_file_keeps_state(win, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog, QMessageBox
-    bad = tmp_path / "bad.opasco"
+    bad = tmp_path / "bad.cap"
     bad.write_bytes(b"junk")
     _record_a_bit(win)
     shown = []
@@ -274,13 +274,13 @@ def test_graph_derivative_and_errors(win):
     assert g.result.text() == ""
 
 
-def test_import_cap_into_window(win, tmp_path, monkeypatch):
+def test_open_capstone_file_is_a_copy(win, tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog
     from tests.test_capstone_import import make_cap
     p = make_cap(tmp_path / "lab.cap")
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(p), ""))
-    win.import_cap()
-    assert win.pages.tabText(0) == "lab" and "가져옴" in win.windowTitle() and win.path is None
+    win.open_experiment()
+    assert win.pages.tabText(0) == "lab" and "복사본" in win.windowTitle() and win.path is None  # Save As needed
     graph = win.pages.currentWidget().displays[0]
     assert graph.key == "cap:Force" and len(graph.body.curve.getData()[0]) == 2  # newest run (#2) has 2 samples
 
@@ -348,7 +348,7 @@ def test_calculation_saved_and_restored(win, tmp_path, monkeypatch):
     frame = win.pages.currentWidget().add_display("숫자")
     frame.selector.setCurrentIndex(frame.selector.findData("calc:v2"))
     expected = win.dm.latest("calc:v2")[1][-1]
-    p = str(tmp_path / "c.opasco")
+    p = str(tmp_path / "c.cap")
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
     win.save_experiment()
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Discard)
@@ -426,10 +426,10 @@ def test_dirty_flag_lifecycle(win, tmp_path, monkeypatch):
     assert not win.dirty and win.windowTitle() == "제목 없음 — OpenPASCO"
     win.add_page()
     assert win.dirty and win.windowTitle().startswith("● ")
-    p = str(tmp_path / "d.opasco")
+    p = str(tmp_path / "d.cap")
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
     win.save_experiment()
-    assert not win.dirty and win.windowTitle() == "d.opasco — OpenPASCO"
+    assert not win.dirty and win.windowTitle() == "d.cap — OpenPASCO"
     for change in (lambda: win.pages.currentWidget().add_display("숫자"),
                    lambda: win.pages.currentWidget().remove_display(win.pages.currentWidget().displays[0]),
                    lambda: win.close_page(1)):
@@ -445,9 +445,9 @@ def test_discard_prompt_save_discard_cancel(win, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: next(answers))
     assert not win.confirm_discard("t") and win.dirty  # cancel
     assert win.confirm_discard("t") and win.dirty  # discard: caller proceeds, state untouched
-    p = str(tmp_path / "s.opasco")
+    p = str(tmp_path / "s.cap")
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (p, ""))
-    assert win.confirm_discard("t") and not win.dirty and (tmp_path / "s.opasco").exists()  # save
+    assert win.confirm_discard("t") and not win.dirty and (tmp_path / "s.cap").exists()  # save
     win.add_page()
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Save)
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))  # user cancels the file dialog
@@ -597,15 +597,6 @@ def test_palette_click_adds_display(win):
     assert [f.kind for f in win.pages.currentWidget().displays] == ["숫자"]
 
 
-def test_open_dispatches_cap_to_import(win, tmp_path, monkeypatch):
-    from openpasco.gui import main_window as mw
-    from tests.test_capstone_import import make_cap
-    cap = make_cap(tmp_path / "lab.cap")
-    monkeypatch.setattr(mw.QFileDialog, "getOpenFileName", lambda *a, **k: (str(cap), ""))
-    win.open_experiment()
-    assert "가져옴" in win.windowTitle() and win.path is None
-
-
 def test_start_cards(win, monkeypatch):
     page = win.pages.currentWidget()
     assert page.hint.isVisibleTo(page)
@@ -622,3 +613,15 @@ def test_bad_saved_conditions_are_ignored(win):
     for bad in (None, 5, {"start": {"kind": "x"}}, {"stop": {"kind": "time", "value": "abc"}}):
         c = win._conditions_from(bad)
         assert c.start is None and c.stop is None
+
+
+def test_graph_title_saved_and_marks_dirty(win, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    g = win.pages.currentWidget().add_display("그래프")
+    win._set_clean()
+    g.body.title_edit.textEdited.emit("진자 실험")  # user typing marks the experiment as changed
+    assert win.dirty
+    g.body.title_edit.setText("진자 실험")
+    assert win.layout_state()["pages"][0]["displays"][0]["title"] == "진자 실험"
+    win.apply_layout(win.layout_state())
+    assert win.pages.currentWidget().displays[0].body.title_edit.text() == "진자 실험"

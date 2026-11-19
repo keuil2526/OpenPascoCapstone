@@ -1,7 +1,7 @@
 # Capstone `.cap` 파일 형식 (실측 기반 메모)
 
 공식 명세가 없으므로 **샘플 파일 44개**(사용자 실험 파일과 Wine에 설치된 Capstone의 QuickStart 템플릿, Capstone 버전 1.11 ~ 2.13)를 직접 분석해 얻은 결과다. 확인하지 못한 부분은 "미확인"으로 표시했다.
-구현: [storage/capstone_import.py](../openpasco/storage/capstone_import.py) (읽기 전용 가져오기만 지원, `.cap` 쓰기는 지원하지 않음).
+구현: 읽기 [storage/capstone_import.py](../openpasco/storage/capstone_import.py), 쓰기 [storage/capstone_export.py](../openpasco/storage/capstone_export.py).
 
 ## 컨테이너
 
@@ -36,7 +36,8 @@ DataSource  LongName="Force"  (측정값 이름; BaseUnit/DefaultUnit = 숫자 �
 | 시작 시각 | 파일에서 검증된 시작 시각을 찾지 못해 파일 수정 시각을 사용 |
 | 페이지·디스플레이 | **부분 지원**: `WorkbookPage`(이름) > `WorkbookItem`(`CSLineGraph`/`CSDataTable`/`CSDataDigits`/`CSBarMeter`, 상대 `Position`)에서 종류와 읽는 순서만 가져온다. 디스플레이가 보여주는 측정값은 `BundleInput BundleMeasID`가 `DataSource EUID`와 같은 첫 항목으로 해석한다(샘플의 널이 아닌 링크 467개 전부 일치). 해석 실패 시 순서대로 배정. 축 범위·색·통계·피팅 설정·텍스트 상자·영상은 미지원 |
 | 계산식, 사용자 정의 변수, 이미지/영상 | 미분석 |
-| `.cap` 저장 | 미지원 (Capstone이 읽을 수 있는 파일을 만들 수 없다) |
+| `.cap` 저장 | **부분 지원**: `Header`, `DataRepository`(시간 측정값 + `DataSource`/`DataSet`/저장소 요소), 빈 `Workspace`만 쓴다. 헤더 버전은 설치된 Capstone보다 낮은 2.6.0으로 쓴다(더 높으면 "newer version" 경고). Wine의 Capstone 2.10.8에서 경고 없이 열림을 확인했다. **측정값이 Capstone의 센서/데이터 요약 목록에는 나타나지 않는다** — 센서는 `Hardware > Interface > Channel > Sensor` 항목에 연결되는데 이를 만들지 않았기 때문이다. 간격이 일정하지 않은 시계열은 평균 간격으로 저장한다 |
+| `openpasco.json` | OpenPASCO 전용 ZIP 멤버(배치·계산·기록 조건, 원래 측정값 키·단위). Capstone이 무시하는 것을 확인했다. 파손되면 일반 `.cap`으로 연다 |
 
 ## 안전
 

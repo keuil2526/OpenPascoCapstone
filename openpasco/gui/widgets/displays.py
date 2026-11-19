@@ -10,7 +10,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QTableView, QToolButton,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QTableView, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -115,6 +115,7 @@ class GraphDisplay(QWidget):
     """Plot with optional range selection and analysis (stats, fits, derivative, integral)."""
 
     older_toggled = Signal()  # DisplayFrame reacts by refetching data
+    title_changed = Signal()
     ANALYSES = ["분석 없음", "통계", *MODELS, "미분", "적분"]
     DEBOUNCE_MS = 400  # analysis runs at most this often while data streams in
 
@@ -153,6 +154,9 @@ class GraphDisplay(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.plot, 1)
+        self.title_edit = QLineEdit(placeholderText="[그래프 제목]", objectName="graph_title")  # like Capstone's title line
+        self.title_edit.textEdited.connect(lambda _: self.title_changed.emit())
+        layout.addWidget(self.title_edit)
         layout.addWidget(self.result)
 
         self.meas: Measurement | None = None

@@ -14,6 +14,7 @@ Layout was derived from sample files, not from documentation (see docs/capstone_
 Units are numeric codes. Only codes whose sample values match the unit (checked against real
 files, e.g. Force ~ -10..0, Position 0..0.7, gravity ~9.8) are translated; others stay empty.
 """
+import json
 import struct
 import zipfile
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ from openpasco.hardware.base import Measurement
 
 MAX_XML_BYTES = 200 * 1024 * 1024
 MAX_DATA_BYTES = 512 * 1024 * 1024
+MAX_EXTRA_BYTES = 20 * 1024 * 1024
+EXTRA = "openpasco.json"
 RECORD = struct.Struct("<Id")  # uint32 valid flag, float64 value
 # shortcut: only codes confirmed from sample values; extend when more are verified
 UNITS = {"256": "s", "1024": "V", "1280": "m", "1536": "N", "2048": "m/s²", "2304": "m/s", "3584": "A"}
@@ -40,6 +43,7 @@ class ImportResult:
     skipped: int = 0  # data sets in formats we do not read
     warnings: list[str] = field(default_factory=list)
     pages: list[tuple[str, list[tuple[str, str | None]]]] = field(default_factory=list)  # (page name, display kinds)
+    layout: dict | None = None  # present only in files written by OpenPASCO (member openpasco.json)
 
 
 DISPLAY_TAGS = {"CSLineGraph": "그래프", "CSDataTable": "테이블", "CSDataDigits": "숫자", "CSBarMeter": "미터"}
@@ -96,6 +100,26 @@ def _table_values(raw: bytes, n: int) -> np.ndarray:
     return out
 
 
+def _read_extra(z: zipfile.ZipFile) -> dict | None:
+    """OpenPASCO's own member; anything malformed is ignored so the file still opens as a plain .cap."""
+    try:
+        d = json.loads(_read_member(z, EXTRA, MAX_EXTRA_BYTES))
+        if d.get("version") == 1 and isinstance(d.get("sources"), list) and isinstance(d.get("layout"), dict):
+            return d
+    except (KeyError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def _saved_source(extra, i: int) -> dict:
+    """Text fields of the i-th source from openpasco.json, or {} (then names come from the XML)."""
+    try:
+        d = extra["sources"][i]
+        return {k: d[k] for k in ("key", "sensor", "unit") if isinstance(d.get(k), str)}
+    except (TypeError, IndexError, KeyError):
+        return {}
+
+
 def load_cap(path) -> ImportResult:
     path = Path(path)
     try:
@@ -106,25 +130,30 @@ def load_cap(path) -> ImportResult:
     if root.tag != "DSProExperiment":
         raise ValueError("Capstone 실험 파일이 아닙니다")
 
+    extra = _read_extra(z)
     started = datetime.fromtimestamp(path.stat().st_mtime)  # file stores no verified start time
     runs: dict[int, Run] = {}
     meas: dict[str, tuple[str, Measurement]] = {}
     euid_key: dict[str, str] = {}
+    sidx = 0  # position among named sources: our writer emits them in the order of extra['sources']
     result = ImportResult([], meas)
     with z:
         for src in root.iter("DataSource"):
             name = src.get("LongName")
             if not name:
                 continue
-            key, k = f"cap:{name}", 1
+            saved = _saved_source(extra, sidx)
+            sidx += 1
+            key, k = saved.get("key") or f"cap:{name}", 1
             while key in meas:  # two sources with the same name
                 k += 1
-                key = f"cap:{name}#{k}"
+                key = f"{saved.get('key') or 'cap:' + name}#{k}"
             lo, hi = np.inf, -np.inf
             if src.get("EUID"):
                 euid_key[src.get("EUID")] = key
             # code is trusted only when the display unit equals the base unit
             unit = UNITS.get(src.get("BaseUnit"), "") if src.get("BaseUnit") == src.get("DefaultUnit") else ""
+            unit = saved.get("unit", unit)  # our own file knows the exact unit text
             for ds in src.findall("DataSet"):
                 seg = ds.find("DataSegmentElement")
                 dep = seg.find("DependentStorageElement") if seg is not None else None
@@ -157,7 +186,8 @@ def load_cap(path) -> ImportResult:
             if key in {k2 for r in runs.values() for k2 in r.series}:
                 if lo == hi:
                     lo, hi = lo - 1, hi + 1
-                meas[key] = ("Capstone 파일", Measurement(key, name, unit, float(lo), float(hi)))
+                meas[key] = (saved.get("sensor", "Capstone 파일"), Measurement(key, name, unit, float(lo), float(hi)))
     result.runs = [runs[n] for n in sorted(runs)]
     result.pages = _pages(root, euid_key)
+    result.layout = extra["layout"] if extra else None
     return result

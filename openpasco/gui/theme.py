@@ -47,6 +47,7 @@ QWidget#display_bar QLabel, QWidget#display_bar QCheckBox { color: #333333; }
 QToolButton#start_card { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f0f0f0, stop:1 #cfcfcf);
     color: #444444; border: 1px solid #bdbdbd; border-radius: 3px; padding: 14px 22px 8px 22px; font-size: 15px; }
 QToolButton#start_card:hover { background: #e6edf7; border-color: #7aa7e0; }
+QLineEdit#graph_title { background: transparent; border: none; color: #333333; padding: 2px 6px; }
 QLabel#timer { background: #2e2e2e; color: #ffffff; border: 1px solid #8b8b8b; border-radius: 6px; padding: 2px 16px;
                font-family: monospace; font-size: 26px; font-weight: bold; }
 QLabel#timer[recording="true"] { color: #ff6b6b; }

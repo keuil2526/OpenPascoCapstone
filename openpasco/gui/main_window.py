@@ -25,10 +25,9 @@ from openpasco.gui.widgets.start_cards import StartCards
 from openpasco.gui.widgets.displays import DISPLAY_TYPES, DisplayFrame, style_plot
 from openpasco.hardware import discovery
 from openpasco.hardware.base import Measurement, Sensor
-from openpasco.storage import capstone_import, experiment_storage as storage
+from openpasco.storage import capstone_export, capstone_import, experiment_storage as storage
 
-FILE_FILTER = "OpenPASCO 실험 (*.opasco)"
-OPEN_FILTER = "실험 파일 (*.opasco *.cap);;OpenPASCO 실험 (*.opasco);;Capstone 실험 (*.cap)"
+FILE_FILTER = "Capstone 실험 (*.cap)"
 SAMPLE_RATES_HZ = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
 GRID_COLUMNS = 2
 DISPLAY_MIME = "application/x-openpasco-display"
@@ -181,7 +180,7 @@ class MainWindow(QMainWindow):
     def dropEvent(self, event):
         urls = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
         if urls and urls[0].lower().endswith(".cap"):
-            self.import_cap(urls[0])
+            self.open_experiment(urls[0])
 
     # --- construction -----------------------------------------------------
     def _build_actions(self):
@@ -196,12 +195,11 @@ class MainWindow(QMainWindow):
             return a
 
         self.act_new = act("새 실험", self.new_experiment, QKeySequence.New, QStyle.SP_FileIcon)
-        self.act_open = act("열기…", self.open_experiment, QKeySequence.Open, QStyle.SP_DialogOpenButton)
+        self.act_open = act("열기… (.cap)", self.open_experiment, QKeySequence.Open, QStyle.SP_DialogOpenButton)
         self.act_save = act("저장", self.save_experiment, QKeySequence.Save, QStyle.SP_DialogSaveButton)
         self.act_save_as = act("다른 이름으로 저장…", lambda: self.save_experiment(as_new=True),
                                QKeySequence.SaveAs)
         self.act_export = act("CSV 내보내기…", self.export_csv)
-        self.act_import_cap = act("Capstone 파일 가져오기 (.cap)…", self.import_cap)
         self.act_quit = act("종료", self.close, QKeySequence.Quit)
         self.act_add_page = act("페이지 추가", self.add_page, "Ctrl+T", QStyle.SP_FileDialogNewFolder)
         self.act_rename_page = act("페이지 이름 바꾸기…",
@@ -214,7 +212,7 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()  # menu names follow Capstone's: File / Edit / Workbook / Display / Help
         file_menu = mb.addMenu("파일(&F)")
-        for a in (self.act_new, self.act_open, self.act_save, self.act_save_as, None, self.act_export, self.act_import_cap, None, self.act_quit):
+        for a in (self.act_new, self.act_open, self.act_save, self.act_save_as, None, self.act_export, None, self.act_quit):
             file_menu.addSeparator() if a is None else file_menu.addAction(a)
         mb.addMenu("편집(&E)").addActions([self.act_record, self.act_conditions, self.act_delete_run,
                                           self.act_calc, self.act_calc_delete])
@@ -431,7 +429,8 @@ class MainWindow(QMainWindow):
         return {"rate_index": self.rate_combo.currentIndex(), "conditions": asdict(self.conditions),
                 "calcs": [asdict(c) for c in self.dm.calcs.values()], "pages": [
             {"name": self.pages.tabText(i),
-             "displays": [{"kind": f.kind, "key": f.key} for f in self.pages.widget(i).displays]}
+             "displays": [{"kind": f.kind, "key": f.key, **({"title": f.body.title_edit.text()} if hasattr(f.body, "title_edit") else {})}
+                          for f in self.pages.widget(i).displays]}
             for i in range(self.pages.count())]}
 
     def apply_layout(self, layout: dict):
@@ -443,6 +442,8 @@ class MainWindow(QMainWindow):
                 if d["kind"] not in DISPLAY_TYPES:
                     continue  # file from a newer version; skip unknown display
                 frame = page.add_display(d["kind"])
+                if hasattr(frame.body, "title_edit") and isinstance(d.get("title"), str):
+                    frame.body.title_edit.setText(d["title"])
                 idx = frame.selector.findData(d["key"])
                 if idx >= 0:
                     frame.selector.setCurrentIndex(idx)
@@ -476,83 +477,77 @@ class MainWindow(QMainWindow):
             return
         path = self.path
         if as_new or path is None:
-            name, _ = QFileDialog.getSaveFileName(self, "실험 저장", str(path or "실험.opasco"), FILE_FILTER)
+            name, _ = QFileDialog.getSaveFileName(self, "실험 저장", str(path or "실험.cap"), FILE_FILTER)
             if not name:
                 return
-            path = Path(name).with_suffix(".opasco")
+            path = Path(name).with_suffix(".cap")
         used = {k for r in self.dm.runs for k in r.series}
         meas = {k: v for k, v in self._all_measurements().items() if k in used}
         try:
-            storage.save(path, self.dm.runs, self.layout_state(), meas)
+            warnings = capstone_export.save_cap(path, self.dm.runs, meas, self.layout_state())
         except (OSError, TypeError) as e:
             QMessageBox.critical(self, "저장 실패", str(e))
             return
         self._set_path(path)
-        self.statusBar().showMessage(f"저장됨: {path}")
+        self.statusBar().showMessage(f"저장됨: {path}" + (f" — {warnings[0]}" if warnings else "")
+                                     + (f" 외 {len(warnings) - 1}건" if len(warnings) > 1 else ""))
 
     def _all_measurements(self):
         items = dict(self.known)
         items.update({f"{s.id}:{m.id}": (s.name, m) for s in self.sensors for m in s.measurements})
         return items
 
-    def open_experiment(self):
+    def open_experiment(self, name: str | None = None):
+        """Open a .cap. Files written by OpenPASCO restore everything and save back in place; files made by
+        Capstone are opened as a copy (Save As), so the original is never overwritten by our reduced writer."""
         if self.recording:
             return
-        name, _ = QFileDialog.getOpenFileName(self, "실험 열기", "", OPEN_FILTER)
+        if not name:
+            name, _ = QFileDialog.getOpenFileName(self, "실험 열기", "", FILE_FILTER)
         if not name:
             return
-        if name.lower().endswith(".cap"):  # Capstone files open directly, as an import
-            return self.import_cap(name)
         if not self.confirm_discard("실험 열기"):
-            return
-        try:
-            runs, layout, meas = storage.load(name)
-        except (ValueError, OSError) as e:
-            QMessageBox.critical(self, "열기 실패", str(e))
-            return
-        self.dm.load(runs)
-        self.known = meas
-        skipped = self._restore_calcs(layout.get("calcs", []))
-        self.apply_layout(layout)
-        self._set_path(name)
-        self.statusBar().showMessage(f"열기: {name} — 런 {len(runs)}개"
-                                     + (f" (읽을 수 없는 계산 {skipped}개 건너뜀)" if skipped else ""))
-
-    def import_cap(self, name: str | None = None):
-        if self.recording:
-            return
-        if not name:
-            name, _ = QFileDialog.getOpenFileName(self, "Capstone 파일 가져오기", "", "Capstone 실험 (*.cap)")
-        if not name:
-            return
-        if not self.confirm_discard("가져오기"):
             return
         try:
             res = capstone_import.load_cap(name)
         except (ValueError, OSError) as e:
-            QMessageBox.critical(self, "가져오기 실패", str(e))
+            QMessageBox.critical(self, "열기 실패", str(e))
             return
-        if not res.runs:
-            QMessageBox.information(self, "가져오기", "읽을 수 있는 측정 데이터가 없습니다."
+        own = res.layout is not None
+        if not res.runs and not own:
+            QMessageBox.information(self, "열기", "읽을 수 있는 측정 데이터가 없습니다."
                                     + (f"\n(지원하지 않는 형식의 데이터 {res.skipped}개 건너뜀)" if res.skipped else ""))
             return
+        self.dm.load(res.runs)
+        self.known = res.measurements
+        skipped = 0
+        if own:
+            layout = res.layout
+            skipped = self._restore_calcs(layout.get("calcs", []))
+        else:
+            layout = {"pages": self._pages_from_cap(res, name)}
+        self.apply_layout(layout)
+        if own:
+            self._set_path(name)
+        else:
+            self.path = None  # Capstone's own file: saving makes a new .cap
+            self.doc_name = f"{Path(name).name} (복사본)"
+            self._set_clean()
+        notes = (f", 지원하지 않는 데이터 {res.skipped}개 건너뜀" if res.skipped else "") + \
+                (f", 경고 {len(res.warnings)}건" if res.warnings else "") + \
+                (f", 읽을 수 없는 계산 {skipped}개 건너뜀" if skipped else "")
+        self.statusBar().showMessage(f"열기: {Path(name).name} — 런 {len(res.runs)}개, 측정값 {len(res.measurements)}종{notes}")
+
+    @staticmethod
+    def _pages_from_cap(res, name) -> list:
         keys = [k for r in res.runs[:1] for k in r.series] or list(res.measurements)
         pages = []
         for pname, items in res.pages:  # unresolved links fall back to cycling through measurements
             if items:
                 pages.append({"name": pname, "displays": [{"kind": k, "key": key or keys[i % len(keys)]}
                                                           for i, (k, key) in enumerate(items)]})
-        pages = pages or [{"name": Path(name).stem, "displays": [{"kind": "그래프", "key": keys[0]}, {"kind": "테이블", "key": keys[0]}]}]
-        self.dm.load(res.runs)
-        self.known = res.measurements
-        self.apply_layout({"pages": pages})
-        self.path = None  # an import is a new, unsaved experiment
-        self.doc_name = f"{Path(name).name} (가져옴)"
-        self._set_clean()
-        notes = (f", 지원하지 않는 데이터 {res.skipped}개 건너뜀" if res.skipped else "") + \
-                (f", 경고 {len(res.warnings)}건" if res.warnings else "")
-        self.statusBar().showMessage(
-            f"가져옴: 런 {len(res.runs)}개, 측정값 {len(res.measurements)}종{notes} (페이지 구성과 디스플레이별 측정값 포함)")
+        return pages or [{"name": Path(name).stem, "displays": [{"kind": "그래프", "key": keys[0]},
+                                                                {"kind": "테이블", "key": keys[0]}]}]
 
     # --- calculations -----------------------------------------------------
     def create_calc(self, name: str, unit: str, expr: str) -> Calc:
@@ -783,6 +778,8 @@ class MainWindow(QMainWindow):
             frame.refresh(self.dm)
 
     def _init_display(self, frame):
+        if hasattr(frame.body, "title_changed"):
+            frame.body.title_changed.connect(self._mark_dirty)
         frame.set_measurements(self.available_measurements())
         frame.refresh(self.dm)
 
