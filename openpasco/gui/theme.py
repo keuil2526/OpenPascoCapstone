@@ -5,15 +5,15 @@ CHROME_QSS = """
 QMainWindow { background: #666666; }
 QMainWindow::separator { background: #3a3a3a; width: 2px; height: 2px; }
 QMenuBar { background: #6d6d6d; color: #ffffff; }
-QMenuBar::item { padding: 4px 9px; background: transparent; }
+QMenuBar::item { padding: 1px 8px; background: transparent; }
 QMenuBar::item:selected { background: #8a8a8a; }
 QMenu { background: #555555; color: #ffffff; border: 1px solid #2f2f2f; }
 QMenu::item { padding: 5px 24px; }
 QMenu::item:selected { background: #2a82da; }
 QMenu::item:disabled { color: #9a9a9a; }
 QMenu::separator { height: 1px; background: #444444; margin: 3px 6px; }
-QToolBar#main_toolbar { background: #676767; border: none; border-top: 1px solid #555555; spacing: 6px; padding: 2px 4px; }
-QToolBar#main_toolbar QToolButton { color: #ffffff; padding: 3px 7px; border-radius: 3px; }
+QToolBar#main_toolbar { background: #676767; border: none; border-top: 1px solid #555555; spacing: 6px; padding: 0 4px; }
+QToolBar#main_toolbar QToolButton { color: #ffffff; padding: 1px 4px; border-radius: 3px; }
 QToolBar#main_toolbar QToolButton:hover { background: #8f8f8f; }
 QToolBar#control_bar { background: #666666; border: none; border-top: 1px solid #3a3a3a; padding: 3px; }
 QFrame#ctl_group { background: #5b5b5b; border: 1px solid #525252; border-radius: 8px; }
@@ -38,7 +38,7 @@ QToolBar#page_row { background: #b2b2b2; border: none; padding: 0 4px; }
 QToolButton#tab_plus { color: #333333; font-size: 16px; padding: 0 8px; }
 QTabBar#tab_row { background: #b2b2b2; }
 QTabBar { background: #b2b2b2; }
-QTabBar::tab { background: #c8c8c8; color: #222222; padding: 5px 14px; border: 1px solid #9a9a9a;
+QTabBar::tab { background: #c8c8c8; color: #222222; padding: 2px 12px; border: 1px solid #9a9a9a;
                border-bottom: none; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 1px; }
 QTabBar::tab:selected { background: #ffffff; color: #222222; }
 QTabWidget::pane { border: 10px solid #666666; background: palette(base); }
@@ -48,7 +48,10 @@ QWidget#display_bar { background: #e9e9e9; }
 QToolButton#graph_tool:checked { background: #c9d9ee; border: 1px solid #8fb0dd; border-radius: 3px; }
 QWidget#display_bar QLabel, QWidget#display_bar QCheckBox { color: #333333; }
 QToolButton#start_card { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f0f0f0, stop:1 #cfcfcf);
-    color: #444444; border: 1px solid #bdbdbd; border-radius: 3px; padding: 14px 22px 8px 22px; font-size: 15px; }
+    color: #444444; border: 1px solid #bdbdbd; border-radius: 3px; padding: 0 0 8px 0; font-size: 18px; }
+QToolButton#start_button { background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f0f0f0, stop:1 #cfcfcf);
+    color: #444444; border: 1px solid #bdbdbd; border-radius: 3px; padding: 8px 36px; font-size: 18px; }
+QToolButton#start_button:hover { background: #e6edf7; border-color: #7aa7e0; }
 QToolButton#start_card:hover { background: #e6edf7; border-color: #7aa7e0; }
 QLineEdit#graph_title { background: transparent; border: none; color: #333333; padding: 2px 6px; }
 QLabel#timer { background: #2e2e2e; color: #ffffff; border: 1px solid #8b8b8b; border-radius: 6px; padding: 2px 16px;

@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
 
         tb = QToolBar("기본", movable=False, objectName="main_toolbar")
         tb.setToolButtonStyle(Qt.ToolButtonIconOnly)  # icons only, like Capstone; text shows as tooltip
-        tb.setIconSize(QSize(26, 26))
+        tb.setIconSize(QSize(22, 22))
         tb.addActions([self.act_new, self.act_open, self.act_save])
         tb.addSeparator()
         tb.addAction(self.act_add_page)
@@ -752,6 +752,8 @@ class MainWindow(QMainWindow):
             self.scan_devices()
         elif card == "open":
             self.open_experiment()
+        elif card == "help":
+            self.about()
         elif card == "templates":
             menu = QMenu(self)
             for name, kinds in self.TEMPLATES.items():

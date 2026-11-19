@@ -4,7 +4,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QGridLayout, QToolButton, QWidget
 
-W, H, SCALE = 150, 100, 2
+W, H, SCALE = 300, 200, 2  # card picture size; the drawing code works on a 150x100 canvas
 BLUE, GREY = QColor("#1565c0"), QColor("#777777")
 
 
@@ -53,39 +53,35 @@ def _templates(p):
         p.drawRect(QRectF(90 + i * 12, 90 - h, 9, h))
 
 
-def _open(p):
-    p.setPen(_pen(GREY, 2.5))
-    p.setBrush(QColor("#f0c14b"))
-    p.drawRoundedRect(QRectF(30, 30, 90, 52), 5, 5)
-    p.drawPolygon(QPolygonF([QPointF(30, 30), QPointF(30, 22), QPointF(58, 22), QPointF(66, 30)]))
-
-
 def _pixmap(draw) -> QIcon:
     pm = QPixmap(W * SCALE, H * SCALE)
     pm.setDevicePixelRatio(SCALE)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
+    p.scale(W / 150, H / 100)
     draw(p)
     p.end()
     return QIcon(pm)
 
 
 CARDS = [("sensor", "센서 데이터", _sensor, "그래프와 표를 놓고 센서를 검색합니다"),
-         ("templates", "템플릿", _templates, "자주 쓰는 디스플레이 배치로 시작합니다"),
-         ("open", "열기", _open, "저장한 실험이나 Capstone(.cap) 파일을 엽니다")]
+         ("templates", "템플릿", _templates, "자주 쓰는 디스플레이 배치로 시작합니다")]
+BUTTONS = [("open", "열기", "저장한 실험이나 Capstone(.cap) 파일을 엽니다"),
+           ("help", "정보", "OpenPASCO 정보")]
 
 
 class StartCards(QWidget):
-    chosen = Signal(str, QWidget)  # card id, the card button (menus open next to it)
+    chosen = Signal(str, QWidget)  # card id, the widget clicked (menus open next to it)
 
     def __init__(self):
         super().__init__()
         grid = QGridLayout(self)
-        grid.setSpacing(24)
-        grid.setContentsMargins(30, 30, 30, 30)
-        grid.setRowStretch(0, 1)
-        grid.setRowStretch(2, 1)
+        grid.setHorizontalSpacing(60)
+        grid.setVerticalSpacing(36)
+        grid.setContentsMargins(30, 20, 30, 30)
+        grid.setRowStretch(0, 1)  # Capstone keeps the cards in the upper part of the page
+        grid.setRowStretch(3, 3)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(len(CARDS) + 1, 1)
         for i, (cid, title, draw, tip) in enumerate(CARDS):
@@ -95,3 +91,7 @@ class StartCards(QWidget):
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             b.clicked.connect(lambda _=False, c=cid, btn=b: self.chosen.emit(c, btn))
             grid.addWidget(b, 1, i + 1)
+        for i, (cid, title, tip) in enumerate(BUTTONS):
+            b = QToolButton(objectName="start_button", text=title, toolTip=tip)
+            b.clicked.connect(lambda _=False, c=cid, btn=b: self.chosen.emit(c, btn))
+            grid.addWidget(b, 2, i + 1, Qt.AlignCenter)
